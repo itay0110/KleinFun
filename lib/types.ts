@@ -43,6 +43,8 @@ export interface Activity {
   creatorId: UserId;
   createdAt: string;
   startTime: string;
+  location?: string;
+  notes?: string;
   responses: Record<UserId, ActivityResponse>;
   comments: ActivityComment[];
 }

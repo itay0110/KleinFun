@@ -34,6 +34,7 @@ interface KleinFunState {
   busySlots: BusySlot[];
   activities: Record<ActivityId, Activity>;
   notifications: NotificationPayload[];
+  activityTypesByGroup: Record<GroupId, { id: string; label: string }[]>;
 }
 
 interface KleinFunContextValue extends KleinFunState {
@@ -55,6 +56,13 @@ interface KleinFunContextValue extends KleinFunState {
   ) => void;
   addCommentToActivity: (activityId: ActivityId, text: string) => void;
   updateActivityTime: (activityId: ActivityId, startTime: Date) => void;
+  updateActivityDetails: (
+    activityId: ActivityId,
+    details: { location?: string; notes?: string }
+  ) => void;
+  getActivityTypesForGroup: (groupId: GroupId) => { id: string; label: string }[];
+  addActivityTypeToGroup: (groupId: GroupId, label: string) => void;
+  deleteActivityTypeFromGroup: (groupId: GroupId, typeId: string) => void;
   getGroupMemberStatuses: (groupId: GroupId) => GroupMemberStatus[];
   getGroupActivities: (groupId: GroupId) => Activity[];
   getActivityById: (id: ActivityId) => Activity | undefined;
@@ -74,7 +82,8 @@ function loadInitialState(): KleinFunState {
       groups: {},
       busySlots: [],
       activities: {},
-      notifications: []
+      notifications: [],
+      activityTypesByGroup: {}
     };
   }
 
@@ -87,7 +96,8 @@ function loadInitialState(): KleinFunState {
         groups: {},
         busySlots: [],
         activities: {},
-        notifications: []
+        notifications: [],
+        activityTypesByGroup: {}
       };
     }
     const parsed = JSON.parse(raw) as KleinFunState;
@@ -99,7 +109,8 @@ function loadInitialState(): KleinFunState {
       groups: {},
       busySlots: [],
       activities: {},
-      notifications: []
+      notifications: [],
+      activityTypesByGroup: {}
     };
   }
 }
@@ -172,6 +183,10 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
 
       setAndPersist(prev => {
         const { [groupId]: _removed, ...restGroups } = prev.groups;
+        const {
+          [groupId]: _removedTypes,
+          ...restActivityTypes
+        } = prev.activityTypesByGroup ?? {};
         return {
           ...prev,
           groups: restGroups,
@@ -181,7 +196,8 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
               ([, act]) => act.groupId !== groupId
             )
           ),
-          notifications: prev.notifications.filter(n => n.groupId !== groupId)
+          notifications: prev.notifications.filter(n => n.groupId !== groupId),
+          activityTypesByGroup: restActivityTypes
         };
       });
     },
@@ -220,6 +236,59 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
         .filter(Boolean);
     },
     [state.groups, state.users]
+  );
+
+  const getActivityTypesForGroup = useCallback(
+    (groupId: GroupId): { id: string; label: string }[] => {
+      const map = state.activityTypesByGroup ?? {};
+      return map[groupId] ?? [];
+    },
+    [state.activityTypesByGroup]
+  );
+
+  const addActivityTypeToGroup = useCallback(
+    (groupId: GroupId, label: string) => {
+      const trimmed = label.trim();
+      if (!trimmed) return;
+      setAndPersist(prev => {
+        const map = prev.activityTypesByGroup ?? {};
+        const current = map[groupId] ?? [];
+        if (current.some(t => t.label.toLowerCase() === trimmed.toLowerCase())) {
+          return prev;
+        }
+        const nextForGroup = [...current, { id: generateId("atype"), label: trimmed }];
+        return {
+          ...prev,
+          activityTypesByGroup: {
+            ...map,
+            [groupId]: nextForGroup
+          }
+        };
+      });
+    },
+    [setAndPersist]
+  );
+
+  const deleteActivityTypeFromGroup = useCallback(
+    (groupId: GroupId, typeId: string) => {
+      setAndPersist(prev => {
+        const map = prev.activityTypesByGroup ?? {};
+        const current = map[groupId];
+        if (!current) return prev;
+        const nextForGroup = current.filter(t => t.id !== typeId);
+        const nextMap = { ...map };
+        if (nextForGroup.length > 0) {
+          nextMap[groupId] = nextForGroup;
+        } else {
+          delete nextMap[groupId];
+        }
+        return {
+          ...prev,
+          activityTypesByGroup: nextMap
+        };
+      });
+    },
+    [setAndPersist]
   );
 
   const addBusySlot = useCallback(
@@ -307,6 +376,8 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
         creatorId: state.currentUser.id,
         createdAt: now.toISOString(),
         startTime: start.toISOString(),
+        location: "",
+        notes: "",
         responses,
         comments: []
       };
@@ -402,6 +473,29 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
         const updated: Activity = {
           ...activity,
           startTime: startTime.toISOString()
+        };
+        return {
+          ...prev,
+          activities: { ...prev.activities, [activityId]: updated }
+        };
+      });
+    },
+    [setAndPersist, state.currentUser]
+  );
+
+  const updateActivityDetails = useCallback(
+    (
+      activityId: ActivityId,
+      details: { location?: string; notes?: string }
+    ) => {
+      if (!state.currentUser) return;
+      setAndPersist(prev => {
+        const activity = prev.activities[activityId];
+        if (!activity || activity.creatorId !== state.currentUser!.id) return prev;
+        const updated: Activity = {
+          ...activity,
+          ...(details.location !== undefined && { location: details.location }),
+          ...(details.notes !== undefined && { notes: details.notes })
         };
         return {
           ...prev,
@@ -537,6 +631,10 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
       respondToActivity,
       addCommentToActivity,
       updateActivityTime,
+      updateActivityDetails,
+      getActivityTypesForGroup,
+      addActivityTypeToGroup,
+      deleteActivityTypeFromGroup,
       getGroupMemberStatuses,
       getGroupActivities,
       getActivityById,
@@ -559,6 +657,10 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
       respondToActivity,
       addCommentToActivity,
       updateActivityTime,
+      updateActivityDetails,
+      getActivityTypesForGroup,
+      addActivityTypeToGroup,
+      deleteActivityTypeFromGroup,
       getGroupMemberStatuses,
       getGroupActivities,
       getActivityById,

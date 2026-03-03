@@ -60,6 +60,10 @@ export function GroupDashboard() {
     respondToActivity,
     addCommentToActivity,
     updateActivityTime,
+    updateActivityDetails,
+    getActivityTypesForGroup,
+    addActivityTypeToGroup,
+    deleteActivityTypeFromGroup,
     getActivityById,
     getNotificationsForCurrentUser,
     markNotificationRead
@@ -75,6 +79,9 @@ export function GroupDashboard() {
   const [busyOnGround, setBusyOnGround] = useState(false);
   const [activityComment, setActivityComment] = useState("");
   const [pendingActivityTime, setPendingActivityTime] = useState<string | null>(null);
+  const [pendingLocation, setPendingLocation] = useState("");
+  const [pendingNotes, setPendingNotes] = useState("");
+   const [newActivityTypeLabel, setNewActivityTypeLabel] = useState("");
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [inviteCopied, setInviteCopied] = useState(false);
 
@@ -94,6 +101,9 @@ export function GroupDashboard() {
     ? getGroupMemberStatuses(activeGroup.id)
     : [];
   const activities = activeGroup ? getGroupActivities(activeGroup.id) : [];
+  const activityTypes = activeGroup
+    ? getActivityTypesForGroup(activeGroup.id)
+    : [];
   const notifications = getNotificationsForCurrentUser();
   const myBusySlots: BusySlot[] = useMemo(() => {
     if (!currentUser) return [];
@@ -122,6 +132,7 @@ export function GroupDashboard() {
   const handleCreateGroup = () => {
     if (!newGroupName.trim()) return;
     const group = createGroup(newGroupName.trim());
+    createActivity(group.id, "בירה");
     setNewGroupName("");
     router.push(`/?group=${group.id}`);
   };
@@ -146,29 +157,6 @@ export function GroupDashboard() {
       if (!activeGroup) return;
       addBusySlot(activeGroup.id, start, end, busyOnGround);
     }
-
-    // #region agent log
-    fetch("http://127.0.0.1:7544/ingest/f4fa5eb8-6867-4703-900a-c451c59a00be", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "7761ff"
-      },
-      body: JSON.stringify({
-        sessionId: "7761ff",
-        runId: "time-menu-custom-1",
-        hypothesisId: "custom-15min-menu-values",
-        location: "components/group-dashboard.tsx:handleUpdateAvailability",
-        message: "Availability window saved from custom 15-min controls",
-        timestamp: Date.now(),
-        data: {
-          busyStart,
-          busyEnd,
-          busyOnGround
-        }
-      })
-    }).catch(() => {});
-    // #endregion agent log
     const nextStart = new Date(end);
     const nextEnd = addHours(nextStart, 6);
     setBusyStart(formatDateTimeLocalInput(nextStart));
@@ -194,8 +182,12 @@ export function GroupDashboard() {
       setPendingActivityTime(
         formatDateTimeLocalInput(new Date(selectedActivity.startTime))
       );
+      setPendingLocation(selectedActivity.location ?? "");
+      setPendingNotes(selectedActivity.notes ?? "");
     } else {
       setPendingActivityTime(null);
+      setPendingLocation("");
+      setPendingNotes("");
     }
   }, [selectedActivity]);
 
@@ -325,6 +317,38 @@ export function GroupDashboard() {
             <p className="text-xs text-slate-500">
               Let your group know when you&apos;re busy in the next 48 hours.
             </p>
+            {myBusySlots.length > 0 && (
+              <div className="space-y-1 rounded-2xl bg-slate-50 p-2">
+                <p className="text-[11px] font-medium text-slate-600">
+                  Your busy windows
+                </p>
+                {myBusySlots.map(slot => {
+                  const start = new Date(slot.start);
+                  const end = new Date(slot.end);
+                  const day = start.toLocaleDateString(undefined, {
+                    month: "short",
+                    day: "numeric"
+                  });
+                  const range = `${formatTimeShort(start)} – ${formatTimeShort(end)}`;
+                  return (
+                    <div
+                      key={slot.id}
+                      className="flex items-center justify-between gap-2 rounded-2xl bg-white px-2 py-1.5 text-[11px] text-slate-800"
+                    >
+                      <div className="flex flex-col">
+                        <span className="font-medium">{day}</span>
+                        <span className="text-slate-600">{range}</span>
+                      </div>
+                      {slot.onGround && (
+                        <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-800">
+                          On ground
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </Card>
 
           {currentUser && (
@@ -468,7 +492,60 @@ export function GroupDashboard() {
                   <span>{label}</span>
                 </button>
               ))}
+              {activityTypes.map(type => (
+                <div key={type.id} className="relative">
+                  <button
+                    className="flex w-full flex-col items-center justify-center gap-1 rounded-2xl bg-slate-50 px-2 py-3 text-xs font-medium text-slate-800 shadow-soft"
+                    onClick={() => {
+                      if (!activeGroup) return;
+                      const activity = createActivity(activeGroup.id, type.label);
+                      setSelectedActivityId(activity.id);
+                      setActivitySheetOpen(true);
+                    }}
+                  >
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-[10px] font-semibold text-white">
+                      {type.label.trim().charAt(0).toUpperCase() || "A"}
+                    </span>
+                    <span className="truncate">{type.label}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-white/80 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                    onClick={e => {
+                      e.stopPropagation();
+                      if (!activeGroup) return;
+                      deleteActivityTypeFromGroup(activeGroup.id, type.id);
+                    }}
+                    aria-label={`Delete activity type ${type.label}`}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
             </div>
+            {activeGroup && (
+              <div className="mt-2 flex items-center gap-2">
+                <Input
+                  className="h-8 text-xs"
+                  placeholder="Add activity type (per group)"
+                  value={newActivityTypeLabel}
+                  onChange={e => setNewActivityTypeLabel(e.target.value)}
+                />
+                <Button
+                  size="sm"
+                  disabled={!newActivityTypeLabel.trim()}
+                  onClick={() => {
+                    if (!activeGroup) return;
+                    if (!newActivityTypeLabel.trim()) return;
+                    addActivityTypeToGroup(activeGroup.id, newActivityTypeLabel);
+                    setNewActivityTypeLabel("");
+                  }}
+                >
+                  <Plus className="mr-1.5 h-3 w-3" />
+                  Add
+                </Button>
+              </div>
+            )}
             <div className="space-y-2">
               {activities.length === 0 && (
                 <p className="text-xs text-slate-500">
@@ -645,70 +722,62 @@ export function GroupDashboard() {
             </Button>
           </div>
 
-          {currentUser && (
+          {currentUser && myBusySlots.length > 0 && (
             <div className="space-y-1">
               <p className="text-xs font-medium text-slate-700">
-                Your busy windows
+                Edit or remove a window
               </p>
-              {myBusySlots.length === 0 && (
-                <p className="text-[11px] text-slate-500">
-                  No busy timeframes set yet.
-                </p>
-              )}
-              {myBusySlots.length > 0 && (
-                <div className="space-y-1 rounded-2xl bg-slate-50 p-2">
-                  {myBusySlots.map(slot => {
-                    const start = new Date(slot.start);
-                    const end = new Date(slot.end);
-                    const day = start.toLocaleDateString(undefined, {
-                      month: "short",
-                      day: "numeric"
-                    });
-                    const range = `${formatTimeShort(start)} – ${formatTimeShort(
-                      end
-                    )}`;
-                    const isEditing = editingBusyId === slot.id;
-                    return (
-                      <div
-                        key={slot.id}
-                        className="flex items-center justify-between gap-2 rounded-2xl bg-white px-2 py-1 text-[11px] text-slate-800"
-                      >
-                        <div className="flex flex-col">
-                          <span className="font-medium">{day}</span>
-                          <span className="text-slate-600">{range}</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 px-2 text-[11px]"
-                            onClick={() => {
-                              setEditingBusyId(slot.id);
-                              setBusyStart(formatDateTimeLocalInput(start));
-                              setBusyEnd(formatDateTimeLocalInput(end));
-                            }}
-                          >
-                            {isEditing ? "Editing" : "Edit"}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            className="h-7 px-2 text-[11px]"
-                            onClick={() => {
-                              deleteBusySlot(slot.id);
-                              if (editingBusyId === slot.id) {
-                                setEditingBusyId(null);
-                              }
-                            }}
-                          >
-                            Delete
-                          </Button>
-                        </div>
+              <div className="space-y-1 rounded-2xl bg-slate-50 p-2">
+                {myBusySlots.map(slot => {
+                  const start = new Date(slot.start);
+                  const end = new Date(slot.end);
+                  const day = start.toLocaleDateString(undefined, {
+                    month: "short",
+                    day: "numeric"
+                  });
+                  const range = `${formatTimeShort(start)} – ${formatTimeShort(end)}`;
+                  const isEditing = editingBusyId === slot.id;
+                  return (
+                    <div
+                      key={slot.id}
+                      className="flex items-center justify-between gap-2 rounded-2xl bg-white px-2 py-1 text-[11px] text-slate-800"
+                    >
+                      <div className="flex flex-col">
+                        <span className="font-medium">{day}</span>
+                        <span className="text-slate-600">{range}</span>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
+                      <div className="flex items-center gap-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2 text-[11px]"
+                          onClick={() => {
+                            setEditingBusyId(slot.id);
+                            setBusyStart(formatDateTimeLocalInput(start));
+                            setBusyEnd(formatDateTimeLocalInput(end));
+                            setBusyOnGround(slot.onGround ?? false);
+                          }}
+                        >
+                          {isEditing ? "Editing" : "Edit"}
+                        </Button>
+                        <button
+                          type="button"
+                          className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                          onClick={() => {
+                            deleteBusySlot(slot.id);
+                            if (editingBusyId === slot.id) {
+                              setEditingBusyId(null);
+                            }
+                          }}
+                          aria-label="Delete busy window"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>
@@ -799,17 +868,61 @@ export function GroupDashboard() {
                 >
                   Save time
                 </Button>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  className="flex-1"
+                <button
+                  type="button"
+                  className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
                   disabled={isExpired}
                   onClick={handleDeleteActivity}
+                  aria-label="Delete activity"
                 >
-                  Delete activity
-                </Button>
+                  <Trash2 className="h-4 w-4" />
+                </button>
               </div>
             )}
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-slate-700">Location</p>
+              {isCreator ? (
+                <Input
+                  placeholder="Where?"
+                  value={pendingLocation}
+                  onChange={e => setPendingLocation(e.target.value)}
+                  onBlur={() =>
+                    selectedActivity &&
+                    updateActivityDetails(selectedActivity.id, {
+                      location: pendingLocation.trim() || undefined
+                    })
+                  }
+                  disabled={isExpired}
+                  className="text-sm"
+                />
+              ) : (
+                <p className="rounded-2xl bg-slate-50 px-3 py-2 text-sm text-slate-800">
+                  {selectedActivity.location || "—"}
+                </p>
+              )}
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-slate-700">Notes</p>
+              {isCreator ? (
+                <Input
+                  placeholder="Any notes"
+                  value={pendingNotes}
+                  onChange={e => setPendingNotes(e.target.value)}
+                  onBlur={() =>
+                    selectedActivity &&
+                    updateActivityDetails(selectedActivity.id, {
+                      notes: pendingNotes.trim() || undefined
+                    })
+                  }
+                  disabled={isExpired}
+                  className="text-sm"
+                />
+              ) : (
+                <p className="rounded-2xl bg-slate-50 px-3 py-2 text-sm text-slate-800">
+                  {selectedActivity.notes || "—"}
+                </p>
+              )}
             </div>
             <div className="space-y-1">
               <p className="text-xs font-medium text-slate-700">
