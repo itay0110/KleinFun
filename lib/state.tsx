@@ -13,6 +13,7 @@ import {
   ActivityResponse,
   BusySlot,
   GroupId,
+  GroupMemberStatus,
   NotificationPayload,
   User,
   UserId
@@ -54,12 +55,7 @@ interface KleinFunContextValue extends KleinFunState {
   ) => void;
   addCommentToActivity: (activityId: ActivityId, text: string) => void;
   updateActivityTime: (activityId: ActivityId, startTime: Date) => void;
-  getGroupMemberStatuses: (groupId: GroupId) => {
-    user: User;
-    status: "available" | "busy";
-    label: string;
-    sortKey: number;
-  }[];
+  getGroupMemberStatuses: (groupId: GroupId) => GroupMemberStatus[];
   getGroupActivities: (groupId: GroupId) => Activity[];
   getActivityById: (id: ActivityId) => Activity | undefined;
   getNotificationsForCurrentUser: () => NotificationPayload[];
