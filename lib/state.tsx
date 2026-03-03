@@ -18,6 +18,7 @@ import {
   User,
   UserId
 } from "./types";
+import { supabase } from "./supabase";
 import { addHours, addMinutes, formatTimeShort } from "./utils";
 
 interface Group {
@@ -38,7 +39,7 @@ interface KleinFunState {
 }
 
 interface KleinFunContextValue extends KleinFunState {
-  registerUser: (input: { name: string; phone: string }) => void;
+  registerUser: (input: { name: string; phone: string }) => Promise<void>;
   createGroup: (name: string) => Group;
   deleteGroup: (groupId: GroupId) => void;
   joinGroupById: (groupId: GroupId) => Group | null;
@@ -140,14 +141,35 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const registerUser = useCallback(
-    (input: { name: string; phone: string }) => {
+    async (input: { name: string; phone: string }) => {
       const id = generateId("user");
       const user: User = { id, ...input };
+
+      // Update local state immediately for a snappy UX
       setAndPersist(prev => ({
         ...prev,
         currentUser: user,
         users: { ...prev.users, [id]: user }
       }));
+
+      // Persist to Supabase "profiles" table
+      try {
+          const { data, error } = await supabase
+          .from("users")
+          .insert({ name: input.name, phone: input.phone })
+          .select()
+          .single();
+
+        if (error) {
+          // eslint-disable-next-line no-console
+          console.error("Failed to persist user to Supabase", error);
+          throw error;
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("Unexpected error while persisting user to Supabase", err);
+        throw err;
+      }
     },
     [setAndPersist]
   );

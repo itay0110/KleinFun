@@ -10,8 +10,23 @@ export function AuthForm() {
   const { registerUser } = useKleinFun();
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const disabled = !name.trim() || !phone.trim();
+  const disabled = !name.trim() || !phone.trim() || loading;
+
+  const handleContinue = async () => {
+    if (disabled) return;
+    setError(null);
+    setLoading(true);
+    try {
+      await registerUser({ name: name.trim(), phone: phone.trim() });
+    } catch (_err) {
+      setError("Something went wrong while saving your profile. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="flex flex-1 flex-col justify-center">
@@ -44,13 +59,14 @@ export function AuthForm() {
             />
           </div>
         </div>
-        <Button
-          className="w-full"
-          disabled={disabled}
-          onClick={() => registerUser({ name: name.trim(), phone: phone.trim() })}
-        >
-          Continue
+        <Button className="w-full" disabled={disabled} onClick={handleContinue}>
+          {loading ? "Continuing..." : "Continue"}
         </Button>
+        {error && (
+          <p className="text-[11px] text-rose-500">
+            {error}
+          </p>
+        )}
         <p className="text-[11px] leading-snug text-slate-400">
           No passwords, no emails. Just mock local data on this device.
         </p>
