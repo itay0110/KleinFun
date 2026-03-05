@@ -45,6 +45,7 @@ interface KleinFunContextValue extends KleinFunState {
   createGroup: (name: string) => Promise<Group>;
   deleteGroup: (groupId: GroupId) => void;
   joinGroupById: (groupId: GroupId) => Group | null;
+  joinGroupByInviteLink: (groupId: GroupId) => Promise<Group | null>;
   getGroupMembers: (groupId: GroupId) => User[];
   addBusySlot: (groupId: GroupId, start: Date, end: Date, onGround: boolean) => void;
   updateBusySlot: (slotId: string, start: Date, end: Date, onGround: boolean) => void;
@@ -382,6 +383,102 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
       return result;
     },
     [setAndPersist, state.currentUser]
+  );
+
+  const joinGroupByInviteLink = useCallback(
+    async (groupId: GroupId): Promise<Group | null> => {
+      if (!state.currentUser) return null;
+
+      const existing = state.groups[groupId];
+      if (existing) {
+        if (existing.memberIds.includes(state.currentUser.id)) {
+          return existing;
+        }
+        const { error: memberError } = await supabase
+          .from("group_members")
+          .insert({
+            group_id: groupId,
+            user_id: state.currentUser.id
+          });
+        if (memberError) {
+          // eslint-disable-next-line no-console
+          console.error("Failed to add member via invite link", memberError);
+          return null;
+        }
+        const updated: Group = {
+          ...existing,
+          memberIds: [...existing.memberIds, state.currentUser.id]
+        };
+        setAndPersist(prev => ({
+          ...prev,
+          groups: { ...prev.groups, [groupId]: updated }
+        }));
+        return updated;
+      }
+
+      const { data: groupRow, error: groupError } = await supabase
+        .from("groups")
+        .select()
+        .eq("id", groupId)
+        .single();
+
+      if (groupError || !groupRow) {
+        // eslint-disable-next-line no-console
+        console.error("Group not found for invite link", groupError);
+        return null;
+      }
+
+      const { error: memberError } = await supabase
+        .from("group_members")
+        .insert({
+          group_id: groupId,
+          user_id: state.currentUser.id
+        });
+
+      if (memberError) {
+        // eslint-disable-next-line no-console
+        console.error("Failed to add member via invite link", memberError);
+        return null;
+      }
+
+      const { data: memberRows } = await supabase
+        .from("group_members")
+        .select("user_id")
+        .eq("group_id", groupId);
+
+      const memberIds = (memberRows ?? [])
+        .map((r: { user_id: string }) => r.user_id)
+        .filter(Boolean);
+
+      const userIds = [...new Set(memberIds)];
+      if (userIds.length === 0) return null;
+
+      const { data: userRows } = await supabase
+        .from("users")
+        .select()
+        .in("id", userIds);
+
+      const usersMap: Record<UserId, User> = { ...state.users };
+      (userRows ?? []).forEach((row: { id: string; name: string; phone: string }) => {
+        usersMap[row.id] = { id: row.id, name: row.name, phone: row.phone };
+      });
+
+      const group: Group = {
+        id: groupRow.id,
+        name: groupRow.name,
+        memberIds,
+        createdBy: groupRow.created_by
+      };
+
+      setAndPersist(prev => ({
+        ...prev,
+        users: usersMap,
+        groups: { ...prev.groups, [groupId]: group }
+      }));
+
+      return group;
+    },
+    [setAndPersist, state.currentUser, state.groups, state.users]
   );
 
   const getGroupMembers = useCallback(
@@ -809,6 +906,7 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
       createGroup,
       deleteGroup,
       joinGroupById,
+      joinGroupByInviteLink,
       getGroupMembers,
       addBusySlot,
       updateBusySlot,
@@ -836,6 +934,7 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
       createGroup,
       deleteGroup,
       joinGroupById,
+      joinGroupByInviteLink,
       getGroupMembers,
       addBusySlot,
       updateBusySlot,

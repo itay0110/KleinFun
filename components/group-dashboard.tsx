@@ -49,6 +49,7 @@ export function GroupDashboard() {
     createGroup,
     deleteGroup,
     joinGroupById,
+    joinGroupByInviteLink,
     getGroupMembers,
     getGroupMemberStatuses,
     addBusySlot,
@@ -87,6 +88,14 @@ export function GroupDashboard() {
   const [inviteCopied, setInviteCopied] = useState(false);
   const [hiddenDefaultActivityIds, setHiddenDefaultActivityIds] = useState<string[]>([]);
   const [showGroupsPanel, setShowGroupsPanel] = useState(false);
+  const [showAddGroupForm, setShowAddGroupForm] = useState(false);
+  const [showAddActivityTypeForm, setShowAddActivityTypeForm] = useState(false);
+
+  // When user opens an invite link (?group=...) while logged in, auto-join the group.
+  useEffect(() => {
+    if (!groupId || !currentUser) return;
+    joinGroupByInviteLink(groupId).catch(() => {});
+  }, [groupId, currentUser, joinGroupByInviteLink]);
 
   const activeGroup = useMemo(() => {
     if (groupId && groups[groupId]) return groups[groupId];
@@ -386,19 +395,40 @@ export function GroupDashboard() {
             <Card className="space-y-3">
               <div className="flex items-center justify-between">
                 <p className="text-sm font-medium text-slate-900">Your groups</p>
-                <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-soft hover:bg-slate-50"
+                  onClick={() => setShowAddGroupForm(prev => !prev)}
+                  aria-label="Add group"
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </div>
+              {showAddGroupForm && (
+                <div className="flex gap-2">
                   <Input
-                    className="h-8 text-xs"
+                    className="h-8 flex-1 text-xs"
                     placeholder="New group name"
                     value={newGroupName}
                     onChange={e => setNewGroupName(e.target.value)}
                   />
-                  <Button size="sm" onClick={handleCreateGroup} disabled={!newGroupName.trim()}>
+                  <Button
+                    size="sm"
+                    disabled={!newGroupName.trim()}
+                    onClick={async () => {
+                      try {
+                        await handleCreateGroup();
+                        setShowAddGroupForm(false);
+                      } catch {
+                        // leave form open on error
+                      }
+                    }}
+                  >
                     <Plus className="mr-1.5 h-3 w-3" />
                     New
                   </Button>
                 </div>
-              </div>
+              )}
               <div className="flex gap-2 overflow-x-auto">
                 {userGroups.map(group => (
                   <div
@@ -587,25 +617,37 @@ export function GroupDashboard() {
             </div>
             {activeGroup && (
               <div className="mt-2 flex items-center gap-2">
-                <Input
-                  className="h-8 text-xs"
-                  placeholder="Add activity type (per group)"
-                  value={newActivityTypeLabel}
-                  onChange={e => setNewActivityTypeLabel(e.target.value)}
-                />
-                <Button
-                  size="sm"
-                  disabled={!newActivityTypeLabel.trim()}
-                  onClick={() => {
-                    if (!activeGroup) return;
-                    if (!newActivityTypeLabel.trim()) return;
-                    addActivityTypeToGroup(activeGroup.id, newActivityTypeLabel);
-                    setNewActivityTypeLabel("");
-                  }}
+                <button
+                  type="button"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-soft hover:bg-slate-50"
+                  onClick={() => setShowAddActivityTypeForm(prev => !prev)}
+                  aria-label="Add activity type"
                 >
-                  <Plus className="mr-1.5 h-3 w-3" />
-                  Add
-                </Button>
+                  <Plus className="h-4 w-4" />
+                </button>
+                {showAddActivityTypeForm && (
+                  <div className="flex flex-1 gap-2">
+                    <Input
+                      className="h-8 flex-1 text-xs"
+                      placeholder="Add activity type (per group)"
+                      value={newActivityTypeLabel}
+                      onChange={e => setNewActivityTypeLabel(e.target.value)}
+                    />
+                    <Button
+                      size="sm"
+                      disabled={!newActivityTypeLabel.trim()}
+                      onClick={() => {
+                        if (!activeGroup || !newActivityTypeLabel.trim()) return;
+                        addActivityTypeToGroup(activeGroup.id, newActivityTypeLabel);
+                        setNewActivityTypeLabel("");
+                        setShowAddActivityTypeForm(false);
+                      }}
+                    >
+                      <Plus className="mr-1.5 h-3 w-3" />
+                      Add
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
             <div className="space-y-2">

@@ -6,21 +6,24 @@ import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { useKleinFun } from "@/lib/state";
 
+const PHONE_PREFIX = "+972";
+
 export function AuthForm() {
   const { registerUser } = useKleinFun();
   const [name, setName] = useState("");
-  const [phone, setPhone] = useState("+972 ");
+  const [phoneNumber, setPhoneNumber] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const disabled = !name.trim() || !phone.trim() || loading;
+  const fullPhone = `${PHONE_PREFIX} ${phoneNumber.trim()}`.trim();
+  const disabled = !name.trim() || !phoneNumber.trim() || loading;
 
   const handleContinue = async () => {
     if (disabled) return;
     setError(null);
     setLoading(true);
     try {
-      await registerUser({ name: name.trim(), phone: phone.trim() });
+      await registerUser({ name: name.trim(), phone: fullPhone });
     } catch (_err) {
       setError("Something went wrong while saving your profile. Please try again.");
     } finally {
@@ -45,23 +48,24 @@ export function AuthForm() {
             <Input
               value={name}
               onChange={e => setName(e.target.value)}
-              placeholder="Ada Lovelace"
+              placeholder="גמל"
             />
           </div>
           <div className="space-y-1">
             <label className="text-xs font-medium text-slate-700">
               Phone
             </label>
-            <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-2 py-1">
-              <span className="flex h-6 w-8 items-center justify-center rounded-md bg-slate-50 text-sm">
-                🇮🇱
-              </span>
+            <div className="flex gap-2">
+              <div className="flex w-[5.5rem] shrink-0 items-center justify-center gap-1 rounded-2xl border border-slate-200 bg-slate-50 px-2 py-2 text-sm text-slate-700">
+                <span aria-hidden>🇮🇱</span>
+                <span>{PHONE_PREFIX}</span>
+              </div>
               <Input
-                className="border-0 px-0 shadow-none focus-visible:ring-0"
                 type="tel"
-                value={phone}
-                onChange={e => setPhone(e.target.value)}
-                placeholder="+972 50 123 4567"
+                value={phoneNumber}
+                onChange={e => setPhoneNumber(e.target.value)}
+                placeholder="50 123 4567"
+                className="flex-1"
               />
             </div>
           </div>
