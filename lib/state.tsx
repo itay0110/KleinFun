@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState
 } from "react";
@@ -40,7 +41,8 @@ interface KleinFunState {
 
 interface KleinFunContextValue extends KleinFunState {
   registerUser: (input: { name: string; phone: string }) => Promise<void>;
-  createGroup: (name: string) => Group;
+  logout: () => void;
+  createGroup: (name: string) => Promise<Group>;
   deleteGroup: (groupId: GroupId) => void;
   joinGroupById: (groupId: GroupId) => Group | null;
   getGroupMembers: (groupId: GroupId) => User[];
@@ -76,44 +78,17 @@ const KleinFunContext = createContext<KleinFunContextValue | null>(null);
 const STORAGE_KEY = "kleinfun-state-v1";
 
 function loadInitialState(): KleinFunState {
-  if (typeof window === "undefined") {
-    return {
-      currentUser: null,
-      users: {},
-      groups: {},
-      busySlots: [],
-      activities: {},
-      notifications: [],
-      activityTypesByGroup: {}
-    };
-  }
-
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return {
-        currentUser: null,
-        users: {},
-        groups: {},
-        busySlots: [],
-        activities: {},
-        notifications: [],
-        activityTypesByGroup: {}
-      };
-    }
-    const parsed = JSON.parse(raw) as KleinFunState;
-    return parsed;
-  } catch {
-    return {
-      currentUser: null,
-      users: {},
-      groups: {},
-      busySlots: [],
-      activities: {},
-      notifications: [],
-      activityTypesByGroup: {}
-    };
-  }
+  // Initial render must be identical on server and client to avoid hydration errors,
+  // so we do NOT read from localStorage here. Local data is loaded in an effect.
+  return {
+    currentUser: null,
+    users: {},
+    groups: {},
+    busySlots: [],
+    activities: {},
+    notifications: [],
+    activityTypesByGroup: {}
+  };
 }
 
 function persistState(state: KleinFunState) {
@@ -132,6 +107,54 @@ function generateId(prefix: string) {
 export function KleinFunProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<KleinFunState>(() => loadInitialState());
 
+  // After mount on the client, hydrate state from localStorage (if available).
+  // We also support a legacy key name (`kleinfun_state_v1`) so that existing
+  // users don't lose their stored groups/activities when the key was renamed.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    try {
+      const legacyKey = "kleinfun_state_v1";
+      const rawNew = window.localStorage.getItem(STORAGE_KEY);
+      const rawLegacy = window.localStorage.getItem(legacyKey);
+      const raw = rawNew ?? rawLegacy;
+      if (!raw) return;
+
+      const parsed = JSON.parse(raw) as Partial<KleinFunState>;
+
+      setState(prev => ({
+        ...prev,
+        ...parsed,
+        currentUser: parsed.currentUser ?? prev.currentUser,
+        users: parsed.users ?? prev.users,
+        groups: parsed.groups ?? prev.groups,
+        busySlots: parsed.busySlots ?? prev.busySlots,
+        activities: parsed.activities ?? prev.activities,
+        notifications: parsed.notifications ?? prev.notifications,
+        activityTypesByGroup:
+          parsed.activityTypesByGroup ?? prev.activityTypesByGroup
+      }));
+
+      // If we loaded from the legacy key and the new key was empty,
+      // migrate the data to the new key and clean up the old one.
+      if (!rawNew && rawLegacy) {
+        try {
+          window.localStorage.removeItem(legacyKey);
+        } catch {
+          // ignore
+        }
+        try {
+          window.localStorage.setItem(STORAGE_KEY, rawLegacy);
+        } catch {
+          // ignore
+        }
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("Failed to hydrate KleinFun state from localStorage", err);
+    }
+  }, []);
+
   const setAndPersist = useCallback((updater: (prev: KleinFunState) => KleinFunState) => {
     setState(prev => {
       const next = updater(prev);
@@ -142,30 +165,98 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
 
   const registerUser = useCallback(
     async (input: { name: string; phone: string }) => {
-      const id = generateId("user");
-      const user: User = { id, ...input };
-
-      // Update local state immediately for a snappy UX
-      setAndPersist(prev => ({
-        ...prev,
-        currentUser: user,
-        users: { ...prev.users, [id]: user }
-      }));
-
-      // Persist to Supabase "profiles" table
       try {
-          const { data, error } = await supabase
+        // #region agent log
+        fetch('http://127.0.0.1:7544/ingest/f4fa5eb8-6867-4703-900a-c451c59a00be', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Debug-Session-Id': 'daf237'
+          },
+          body: JSON.stringify({
+            sessionId: 'daf237',
+            runId: 'run1',
+            hypothesisId: 'H1',
+            location: 'lib/state.tsx:119',
+            message: 'registerUser called',
+            data: {
+              hasName: !!input.name,
+              hasPhone: !!input.phone
+            },
+            timestamp: Date.now()
+          })
+        }).catch(() => {});
+        // #endregion agent log
+
+        const { data, error } = await supabase
           .from("users")
           .insert({ name: input.name, phone: input.phone })
           .select()
           .single();
 
-        if (error) {
+        if (error || !data) {
           // eslint-disable-next-line no-console
           console.error("Failed to persist user to Supabase", error);
-          throw error;
+          throw error ?? new Error("No user returned from Supabase");
         }
+
+        const user: User = {
+          id: data.id,
+          name: data.name,
+          phone: data.phone
+        };
+
+        // #region agent log
+        fetch('http://127.0.0.1:7544/ingest/f4fa5eb8-6867-4703-900a-c451c59a00be', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Debug-Session-Id': 'daf237'
+          },
+          body: JSON.stringify({
+            sessionId: 'daf237',
+            runId: 'run1',
+            hypothesisId: 'H2',
+            location: 'lib/state.tsx:139',
+            message: 'registerUser Supabase insert success',
+            data: {
+              userId: user.id
+            },
+            timestamp: Date.now()
+          })
+        }).catch(() => {});
+        // #endregion agent log
+
+        setAndPersist(prev => ({
+          ...prev,
+          currentUser: user,
+          users: { ...prev.users, [user.id]: user }
+        }));
       } catch (err) {
+        // #region agent log
+        fetch('http://127.0.0.1:7544/ingest/f4fa5eb8-6867-4703-900a-c451c59a00be', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Debug-Session-Id': 'daf237'
+          },
+          body: JSON.stringify({
+            sessionId: 'daf237',
+            runId: 'run1',
+            hypothesisId: 'H3',
+            location: 'lib/state.tsx:151',
+            message: 'registerUser Supabase error',
+            data: {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              code: (err as any)?.code,
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              supabaseMessage: (err as any)?.message
+            },
+            timestamp: Date.now()
+          })
+        }).catch(() => {});
+        // #endregion agent log
+
         // eslint-disable-next-line no-console
         console.error("Unexpected error while persisting user to Supabase", err);
         throw err;
@@ -174,27 +265,65 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
     [setAndPersist]
   );
 
+  const logout = useCallback(() => {
+    setAndPersist(() => loadInitialState());
+  }, [setAndPersist]);
+
   const createGroup = useCallback(
-    (name: string): Group => {
+    async (name: string): Promise<Group> => {
       if (!state.currentUser) {
         throw new Error("No current user");
       }
-      const id = generateId("group");
-      const group: Group = {
-        id,
-        name,
-        memberIds: [state.currentUser.id],
-        createdBy: state.currentUser.id
-      };
-      const next: KleinFunState = {
-        ...state,
-        groups: { ...state.groups, [id]: group }
-      };
-      persistState(next);
-      setState(next);
-      return group;
+
+      try {
+        const { data: groupRow, error: groupError } = await supabase
+          .from("groups")
+          .insert({
+            name,
+            created_by: state.currentUser.id
+          })
+          .select()
+          .single();
+
+        if (groupError || !groupRow) {
+          // eslint-disable-next-line no-console
+          console.error("Failed to create group in Supabase", groupError);
+          throw groupError ?? new Error("No group returned from Supabase");
+        }
+
+        const { error: memberError } = await supabase
+          .from("group_members")
+          .insert({
+            group_id: groupRow.id,
+            user_id: state.currentUser.id
+          });
+
+        if (memberError) {
+          // eslint-disable-next-line no-console
+          console.error("Failed to add creator to group_members", memberError);
+          throw memberError;
+        }
+
+        const group: Group = {
+          id: groupRow.id,
+          name: groupRow.name,
+          memberIds: [state.currentUser.id],
+          createdBy: state.currentUser.id
+        };
+
+        setAndPersist(prev => ({
+          ...prev,
+          groups: { ...prev.groups, [group.id]: group }
+        }));
+
+        return group;
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("Unexpected error while creating group in Supabase", err);
+        throw err;
+      }
     },
-    [state]
+    [setAndPersist, state.currentUser]
   );
 
   const deleteGroup = useCallback(
@@ -229,24 +358,30 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
   const joinGroupById = useCallback(
     (groupId: GroupId): Group | null => {
       if (!state.currentUser) return null;
-      const group = state.groups[groupId];
-      if (!group) return null;
-      if (group.memberIds.includes(state.currentUser.id)) {
-        return group;
-      }
-      const updated: Group = {
-        ...group,
-        memberIds: [...group.memberIds, state.currentUser.id]
-      };
-      const next: KleinFunState = {
-        ...state,
-        groups: { ...state.groups, [groupId]: updated }
-      };
-      persistState(next);
-      setState(next);
-      return updated;
+
+      let result: Group | null = null;
+
+      setAndPersist(prev => {
+        const group = prev.groups[groupId];
+        if (!group) return prev;
+        if (group.memberIds.includes(state.currentUser!.id)) {
+          result = group;
+          return prev;
+        }
+        const updated: Group = {
+          ...group,
+          memberIds: [...group.memberIds, state.currentUser!.id]
+        };
+        result = updated;
+        return {
+          ...prev,
+          groups: { ...prev.groups, [groupId]: updated }
+        };
+      });
+
+      return result;
     },
-    [state]
+    [setAndPersist, state.currentUser]
   );
 
   const getGroupMembers = useCallback(
@@ -376,22 +511,37 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
 
   const createActivity = useCallback(
     (groupId: GroupId, title: string): Activity => {
+      // #region agent log
+      fetch('http://127.0.0.1:7544/ingest/f4fa5eb8-6867-4703-900a-c451c59a00be', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Debug-Session-Id': '303c7c'
+        },
+        body: JSON.stringify({
+          sessionId: '303c7c',
+          runId: 'run1',
+          hypothesisId: 'H3',
+          location: 'lib/state.tsx:291',
+          message: 'createActivity called',
+          data: {
+            groupId,
+            title,
+            hasCurrentUser: !!state.currentUser
+          },
+          timestamp: Date.now()
+        })
+      }).catch(() => {});
+      // #endregion agent log
       if (!state.currentUser) {
         throw new Error("No current user");
       }
+
       const id = generateId("act");
       const now = new Date();
       const start = addMinutes(now, 30);
 
-      const responses: Record<UserId, ActivityResponse> = {};
-      const group = state.groups[groupId];
-      if (group) {
-        group.memberIds.forEach(uid => {
-          responses[uid] = uid === state.currentUser!.id ? "joined" : "pending";
-        });
-      }
-
-      const activity: Activity = {
+      const baseActivity: Activity = {
         id,
         groupId,
         title,
@@ -400,23 +550,38 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
         startTime: start.toISOString(),
         location: "",
         notes: "",
-        responses,
+        responses: {},
         comments: []
       };
 
-      const notifications = buildActivityNotifications(activity, state);
+      setAndPersist(prev => {
+        const responses: Record<UserId, ActivityResponse> = {};
+        const group = prev.groups[groupId];
+        if (group) {
+          group.memberIds.forEach(uid => {
+            responses[uid] = uid === state.currentUser!.id ? "joined" : "pending";
+          });
+        }
 
-      const next: KleinFunState = {
-        ...state,
-        activities: { ...state.activities, [id]: activity },
-        notifications: [...state.notifications, ...notifications]
-      };
+        const activity: Activity = {
+          ...baseActivity,
+          responses
+        };
 
-      persistState(next);
-      setState(next);
-      return activity;
+        const notifications = buildActivityNotifications(activity, prev);
+
+        return {
+          ...prev,
+          activities: { ...prev.activities, [id]: activity },
+          notifications: [...prev.notifications, ...notifications]
+        };
+      });
+
+      // The returned object is consistent with what we just stored,
+      // and callers only need the id/group/title immediately.
+      return baseActivity;
     },
-    [state]
+    [setAndPersist, state.currentUser]
   );
 
   const deleteActivity = useCallback(
@@ -640,6 +805,7 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
     () => ({
       ...state,
       registerUser,
+      logout,
       createGroup,
       deleteGroup,
       joinGroupById,
@@ -666,6 +832,7 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
     [
       state,
       registerUser,
+      logout,
       createGroup,
       deleteGroup,
       joinGroupById,

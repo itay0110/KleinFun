@@ -9,7 +9,7 @@ import { useKleinFun } from "@/lib/state";
 export function AuthForm() {
   const { registerUser } = useKleinFun();
   const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
+  const [phone, setPhone] = useState("+972 ");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,11 +52,18 @@ export function AuthForm() {
             <label className="text-xs font-medium text-slate-700">
               Phone
             </label>
-            <Input
-              value={phone}
-              onChange={e => setPhone(e.target.value)}
-              placeholder="+1 555 123 4567"
-            />
+            <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-2 py-1">
+              <span className="flex h-6 w-8 items-center justify-center rounded-md bg-slate-50 text-sm">
+                🇮🇱
+              </span>
+              <Input
+                className="border-0 px-0 shadow-none focus-visible:ring-0"
+                type="tel"
+                value={phone}
+                onChange={e => setPhone(e.target.value)}
+                placeholder="+972 50 123 4567"
+              />
+            </div>
           </div>
         </div>
         <Button className="w-full" disabled={disabled} onClick={handleContinue}>

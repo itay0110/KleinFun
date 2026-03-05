@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Users, Plus, Bell, Link2, Clock, Beer, Dumbbell, Briefcase, Trash2 } from "lucide-react";
+import { Users, Plus, Bell, Link2, Clock, Beer, Dumbbell, Briefcase, Trash2, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -66,7 +66,8 @@ export function GroupDashboard() {
     deleteActivityTypeFromGroup,
     getActivityById,
     getNotificationsForCurrentUser,
-    markNotificationRead
+    markNotificationRead,
+    logout
   } = useKleinFun();
 
   const [newGroupName, setNewGroupName] = useState("");
@@ -81,9 +82,11 @@ export function GroupDashboard() {
   const [pendingActivityTime, setPendingActivityTime] = useState<string | null>(null);
   const [pendingLocation, setPendingLocation] = useState("");
   const [pendingNotes, setPendingNotes] = useState("");
-   const [newActivityTypeLabel, setNewActivityTypeLabel] = useState("");
+  const [newActivityTypeLabel, setNewActivityTypeLabel] = useState("");
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [inviteCopied, setInviteCopied] = useState(false);
+  const [hiddenDefaultActivityIds, setHiddenDefaultActivityIds] = useState<string[]>([]);
+  const [showGroupsPanel, setShowGroupsPanel] = useState(false);
 
   const activeGroup = useMemo(() => {
     if (groupId && groups[groupId]) return groups[groupId];
@@ -129,9 +132,32 @@ export function GroupDashboard() {
     ? `${typeof window !== "undefined" ? window.location.origin : ""}?group=${activeGroup.id}`
     : "";
 
-  const handleCreateGroup = () => {
+  const handleCreateGroup = async () => {
+    // #region agent log
+    fetch('http://127.0.0.1:7544/ingest/f4fa5eb8-6867-4703-900a-c451c59a00be', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Debug-Session-Id': '303c7c'
+      },
+      body: JSON.stringify({
+        sessionId: '303c7c',
+        runId: 'run1',
+        hypothesisId: 'H1',
+        location: 'components/group-dashboard.tsx:132',
+        message: 'handleCreateGroup invoked',
+        data: {
+          newGroupName,
+          hasActiveGroup: !!activeGroup,
+          groupsCount: Object.keys(groups).length
+        },
+        timestamp: Date.now()
+      })
+    }).catch(() => {});
+    // #endregion agent log
+    console.log("handleCreateGroup", { newGroupName })
     if (!newGroupName.trim()) return;
-    const group = createGroup(newGroupName.trim());
+    const group = await createGroup(newGroupName.trim());
     createActivity(group.id, "בירה");
     setNewGroupName("");
     router.push(`/?group=${group.id}`);
@@ -240,8 +266,15 @@ export function GroupDashboard() {
             {activeGroup ? activeGroup.name : "Your groups"}
           </h2>
           {currentUser && (
-            <p className="text-xs text-slate-500">
-              Signed in as {currentUser.name}
+            <p className="flex items-center gap-2 text-xs text-slate-500">
+              <span>Signed in as {currentUser.name}</span>
+              <button
+                type="button"
+                className="text-[11px] font-medium text-emerald-600 hover:underline"
+                onClick={logout}
+              >
+                Logout
+              </button>
             </p>
           )}
         </div>
@@ -255,9 +288,15 @@ export function GroupDashboard() {
               <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-emerald-500" />
             )}
           </button>
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-900 text-xs font-semibold text-white">
+          <button
+            type="button"
+            className={`flex h-10 w-10 items-center justify-center rounded-2xl text-xs font-semibold ${
+              showGroupsPanel ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700"
+            }`}
+            onClick={() => setShowGroupsPanel(prev => !prev)}
+          >
             <Users className="h-5 w-5" />
-          </div>
+          </button>
         </div>
       </header>
 
@@ -277,15 +316,7 @@ export function GroupDashboard() {
               Create group
             </Button>
           </div>
-          {groupId && (
-            <Button
-              variant="outline"
-              className="w-full text-xs"
-              onClick={handleJoinFromQuery}
-            >
-              Join group from invite link
-            </Button>
-          )}
+          {/* Join group from invite link button removed per request */}
         </Card>
       )}
 
@@ -351,7 +382,7 @@ export function GroupDashboard() {
             )}
           </Card>
 
-          {currentUser && (
+          {currentUser && showGroupsPanel && (
             <Card className="space-y-3">
               <div className="flex items-center justify-between">
                 <p className="text-sm font-medium text-slate-900">Your groups</p>
@@ -482,16 +513,30 @@ export function GroupDashboard() {
               </p>
             </div>
             <div className="grid grid-cols-3 gap-2">
-              {DEFAULT_ACTIVITIES.map(({ id, label, icon: Icon }) => (
-                <button
-                  key={id}
-                  className="flex flex-col items-center justify-center gap-1 rounded-2xl bg-slate-50 px-2 py-3 text-xs font-medium text-slate-800 shadow-soft"
-                  onClick={() => handleActivityClick(id)}
-                >
-                  <Icon className="h-5 w-5 text-slate-700" />
-                  <span>{label}</span>
-                </button>
-              ))}
+              {DEFAULT_ACTIVITIES.filter(a => !hiddenDefaultActivityIds.includes(a.id)).map(
+                ({ id, label, icon: Icon }) => (
+                  <div key={id} className="relative">
+                    <button
+                      className="flex w-full flex-col items-center justify-center gap-1 rounded-2xl bg-slate-50 px-2 py-3 text-xs font-medium text-slate-800 shadow-soft"
+                      onClick={() => handleActivityClick(id)}
+                    >
+                      <Icon className="h-5 w-5 text-slate-700" />
+                      <span>{label}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-white/80 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                      onClick={e => {
+                        e.stopPropagation();
+                        setHiddenDefaultActivityIds(prev => [...prev, id]);
+                      }}
+                      aria-label={`Hide preset activity ${label}`}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
+                )
+              )}
               {activityTypes.map(type => (
                 <div key={type.id} className="relative">
                   <button
@@ -508,18 +553,35 @@ export function GroupDashboard() {
                     </span>
                     <span className="truncate">{type.label}</span>
                   </button>
-                  <button
-                    type="button"
-                    className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-white/80 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
-                    onClick={e => {
-                      e.stopPropagation();
-                      if (!activeGroup) return;
-                      deleteActivityTypeFromGroup(activeGroup.id, type.id);
-                    }}
-                    aria-label={`Delete activity type ${type.label}`}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </button>
+                  <div className="absolute right-1 top-1 flex gap-1">
+                    <button
+                      type="button"
+                      className="flex h-5 w-5 items-center justify-center rounded-full bg-white/80 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                      onClick={e => {
+                        e.stopPropagation();
+                        if (!activeGroup) return;
+                        const nextLabel = window.prompt("Edit activity label", type.label);
+                        if (!nextLabel || !nextLabel.trim()) return;
+                        addActivityTypeToGroup(activeGroup.id, nextLabel.trim());
+                        deleteActivityTypeFromGroup(activeGroup.id, type.id);
+                      }}
+                      aria-label={`Edit activity type ${type.label}`}
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      className="flex h-5 w-5 items-center justify-center rounded-full bg-white/80 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                      onClick={e => {
+                        e.stopPropagation();
+                        if (!activeGroup) return;
+                        deleteActivityTypeFromGroup(activeGroup.id, type.id);
+                      }}
+                      aria-label={`Delete activity type ${type.label}`}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -570,6 +632,10 @@ export function GroupDashboard() {
                         : myResponse === "declined"
                         ? "busy"
                         : "neutral";
+                    const joinedMembers = members.filter(
+                      m => activity.responses[m.id] === "joined"
+                    );
+                    const locationText = activity.location?.trim();
                     return (
                       <button
                         key={activity.id}
@@ -583,7 +649,13 @@ export function GroupDashboard() {
                           <p className="font-medium">{activity.title}</p>
                           <p className="text-[11px] text-slate-500">
                             {formatTimeShort(start)}
+                            {locationText && ` • ${locationText}`}
                           </p>
+                          {joinedMembers.length > 0 && (
+                            <p className="text-[11px] text-slate-500">
+                              {joinedMembers.map(m => m.name).join(", ")}
+                            </p>
+                          )}
                         </div>
                         <Badge tone={tone as any}>{label}</Badge>
                       </button>
@@ -883,19 +955,45 @@ export function GroupDashboard() {
             <div className="space-y-1">
               <p className="text-xs font-medium text-slate-700">Location</p>
               {isCreator ? (
-                <Input
-                  placeholder="Where?"
-                  value={pendingLocation}
-                  onChange={e => setPendingLocation(e.target.value)}
-                  onBlur={() =>
-                    selectedActivity &&
-                    updateActivityDetails(selectedActivity.id, {
-                      location: pendingLocation.trim() || undefined
-                    })
-                  }
-                  disabled={isExpired}
-                  className="text-sm"
-                />
+                <>
+                  <Input
+                    placeholder="Where?"
+                    value={pendingLocation}
+                    onChange={e => setPendingLocation(e.target.value)}
+                    onBlur={() =>
+                      selectedActivity &&
+                      updateActivityDetails(selectedActivity.id, {
+                        location: pendingLocation.trim() || undefined
+                      })
+                    }
+                    disabled={isExpired}
+                    className="text-sm"
+                  />
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {["עין יהב", "חצבה", "בית ספר", "בראשית", "תל אביב", "חצור"].map(
+                      shortcut => (
+                        <Button
+                          key={shortcut}
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-7 px-2 text-[11px]"
+                          disabled={isExpired}
+                          onClick={() => {
+                            setPendingLocation(shortcut);
+                            if (selectedActivity) {
+                              updateActivityDetails(selectedActivity.id, {
+                                location: shortcut
+                              });
+                            }
+                          }}
+                        >
+                          {shortcut}
+                        </Button>
+                      )
+                    )}
+                  </div>
+                </>
               ) : (
                 <p className="rounded-2xl bg-slate-50 px-3 py-2 text-sm text-slate-800">
                   {selectedActivity.location || "—"}
