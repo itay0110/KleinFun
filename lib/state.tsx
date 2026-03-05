@@ -40,7 +40,7 @@ interface KleinFunState {
 }
 
 interface KleinFunContextValue extends KleinFunState {
-  registerUser: (input: { name: string; phone: string }) => Promise<void>;
+  registerUser: (input: { name: string; phone: string; email?: string }) => Promise<void>;
   logout: () => void;
   createGroup: (name: string) => Promise<Group>;
   deleteGroup: (groupId: GroupId) => void;
@@ -165,7 +165,7 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const registerUser = useCallback(
-    async (input: { name: string; phone: string }) => {
+    async (input: { name: string; phone: string; email?: string }) => {
       try {
         // #region agent log
         fetch('http://127.0.0.1:7544/ingest/f4fa5eb8-6867-4703-900a-c451c59a00be', {
@@ -204,7 +204,8 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
         const user: User = {
           id: data.id,
           name: data.name,
-          phone: data.phone
+          phone: data.phone,
+          email: input.email?.trim() || undefined
         };
 
         // #region agent log
@@ -985,9 +986,6 @@ function buildActivityNotifications(
 
   group.memberIds.forEach(uid => {
     if (uid === activity.creatorId) return;
-
-    const isAvailable = computeUserAvailabilityForActivity(uid, start, state.busySlots);
-    if (!isAvailable) return;
 
     const user = state.users[uid];
     if (!user) return;

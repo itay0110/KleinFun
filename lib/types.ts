@@ -6,6 +6,7 @@ export interface User {
   id: UserId;
   name: string;
   phone: string;
+  email?: string;
 }
 
 export interface BusySlot {
