@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
-export default function AuthCallbackPage() {
+function AuthCallbackInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [status, setStatus] = useState<"exchanging" | "done" | "error">("exchanging");
@@ -41,5 +41,19 @@ export default function AuthCallbackPage() {
         <p className="text-sm text-rose-500">Sign-in failed. Redirecting to login.</p>
       )}
     </div>
+  );
+}
+
+export default function AuthCallbackPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex flex-1 flex-col items-center justify-center gap-2">
+          <p className="text-sm text-slate-500">Signing you in…</p>
+        </div>
+      }
+    >
+      <AuthCallbackInner />
+    </Suspense>
   );
 }
