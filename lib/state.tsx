@@ -108,54 +108,6 @@ function generateId(prefix: string) {
 export function KleinFunProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<KleinFunState>(() => loadInitialState());
 
-  // After mount on the client, hydrate state from localStorage (if available).
-  // We also support a legacy key name (`kleinfun_state_v1`) so that existing
-  // users don't lose their stored groups/activities when the key was renamed.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    try {
-      const legacyKey = "kleinfun_state_v1";
-      const rawNew = window.localStorage.getItem(STORAGE_KEY);
-      const rawLegacy = window.localStorage.getItem(legacyKey);
-      const raw = rawNew ?? rawLegacy;
-      if (!raw) return;
-
-      const parsed = JSON.parse(raw) as Partial<KleinFunState>;
-
-      setState(prev => ({
-        ...prev,
-        ...parsed,
-        currentUser: parsed.currentUser ?? prev.currentUser,
-        users: parsed.users ?? prev.users,
-        groups: parsed.groups ?? prev.groups,
-        busySlots: parsed.busySlots ?? prev.busySlots,
-        activities: parsed.activities ?? prev.activities,
-        notifications: parsed.notifications ?? prev.notifications,
-        activityTypesByGroup:
-          parsed.activityTypesByGroup ?? prev.activityTypesByGroup
-      }));
-
-      // If we loaded from the legacy key and the new key was empty,
-      // migrate the data to the new key and clean up the old one.
-      if (!rawNew && rawLegacy) {
-        try {
-          window.localStorage.removeItem(legacyKey);
-        } catch {
-          // ignore
-        }
-        try {
-          window.localStorage.setItem(STORAGE_KEY, rawLegacy);
-        } catch {
-          // ignore
-        }
-      }
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error("Failed to hydrate KleinFun state from localStorage", err);
-    }
-  }, []);
-
   const setAndPersist = useCallback((updater: (prev: KleinFunState) => KleinFunState) => {
     setState(prev => {
       const next = updater(prev);
@@ -268,7 +220,109 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
   );
 
   const logout = useCallback(() => {
+    supabase.auth.signOut().catch(() => {});
     setAndPersist(() => loadInitialState());
+  }, [setAndPersist]);
+
+  // Hydrate from localStorage, then sync Supabase Auth (auth wins so Google login is applied after refresh).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const syncAuthUser = async (
+      authUser: { id: string; email?: string | null; user_metadata?: Record<string, unknown> }
+    ) => {
+      const name =
+        (authUser.user_metadata?.full_name as string) ||
+        (authUser.user_metadata?.name as string) ||
+        authUser.email ||
+        "User";
+      const avatarUrl =
+        (authUser.user_metadata?.avatar_url as string) ||
+        (authUser.user_metadata?.picture as string) ||
+        undefined;
+
+      const { data: existing } = await supabase
+        .from("users")
+        .select()
+        .eq("id", authUser.id)
+        .maybeSingle();
+
+      if (!existing) {
+        await supabase.from("users").insert({
+          id: authUser.id,
+          name,
+          phone: ""
+        });
+      } else {
+        await supabase.from("users").update({ name }).eq("id", authUser.id);
+      }
+
+      const user: User = {
+        id: authUser.id,
+        name,
+        phone: existing?.phone ?? "",
+        email: authUser.email ?? undefined,
+        avatarUrl
+      };
+
+      setAndPersist(prev => ({
+        ...prev,
+        currentUser: user,
+        users: { ...prev.users, [user.id]: user }
+      }));
+    };
+
+    try {
+      const legacyKey = "kleinfun_state_v1";
+      const rawNew = window.localStorage.getItem(STORAGE_KEY);
+      const rawLegacy = window.localStorage.getItem(legacyKey);
+      const raw = rawNew ?? rawLegacy;
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<KleinFunState>;
+        setState(prev => ({
+          ...prev,
+          ...parsed,
+          currentUser: parsed.currentUser ?? prev.currentUser,
+          users: parsed.users ?? prev.users,
+          groups: parsed.groups ?? prev.groups,
+          busySlots: parsed.busySlots ?? prev.busySlots,
+          activities: parsed.activities ?? prev.activities,
+          notifications: parsed.notifications ?? prev.notifications,
+          activityTypesByGroup:
+            parsed.activityTypesByGroup ?? prev.activityTypesByGroup
+        }));
+        if (!rawNew && rawLegacy) {
+          try {
+            window.localStorage.removeItem(legacyKey);
+            window.localStorage.setItem(STORAGE_KEY, rawLegacy);
+          } catch {
+            // ignore
+          }
+        }
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("Failed to hydrate KleinFun state from localStorage", err);
+    }
+
+    (async () => {
+      const {
+        data: { session }
+      } = await supabase.auth.getSession();
+      if (session?.user) await syncAuthUser(session.user);
+    })();
+
+    const {
+      data: { subscription }
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session?.user) {
+        await syncAuthUser(session.user);
+      } else {
+        setAndPersist(prev => ({ ...prev, currentUser: null }));
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, [setAndPersist]);
 
   const createGroup = useCallback(

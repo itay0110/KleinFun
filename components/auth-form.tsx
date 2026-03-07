@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { useKleinFun } from "@/lib/state";
-import { supabase } from "@/lib/supabase";
 
 const PHONE_PREFIX = "+972";
 
@@ -15,7 +15,6 @@ export function AuthForm() {
   const [email, setEmail] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [loading, setLoading] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fullPhone = `${PHONE_PREFIX} ${phoneNumber.trim()}`.trim();
@@ -31,27 +30,6 @@ export function AuthForm() {
       setError("Something went wrong while saving your profile. Please try again.");
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleGoogleSignIn = async () => {
-    if (!phoneNumber.trim()) return;
-    setError(null);
-    setGoogleLoading(true);
-    try {
-      const { error: authError } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: {
-          redirectTo: typeof window !== "undefined" ? window.location.origin : undefined
-        }
-      });
-      if (authError) {
-        setError("Google sign-in failed. Please try again.");
-      }
-    } catch {
-      setError("Google sign-in failed. Please try again.");
-    } finally {
-      setGoogleLoading(false);
     }
   };
 
@@ -105,19 +83,9 @@ export function AuthForm() {
             </div>
           </div>
         </div>
-        <div className="space-y-2">
-          <Button className="w-full" disabled={disabled} onClick={handleContinue}>
-            {loading ? "Continuing..." : "Continue"}
-          </Button>
-          <Button
-            variant="outline"
-            className="w-full"
-            disabled={googleLoading || !phoneNumber.trim()}
-            onClick={handleGoogleSignIn}
-          >
-            {googleLoading ? "Signing in with Google..." : "Sign in with Google"}
-          </Button>
-        </div>
+        <Button className="w-full" disabled={disabled} onClick={handleContinue}>
+          {loading ? "Continuing..." : "Continue"}
+        </Button>
         {error && (
           <p className="text-[11px] text-rose-500">
             {error}
@@ -125,6 +93,12 @@ export function AuthForm() {
         )}
         <p className="text-[11px] leading-snug text-slate-400">
           No passwords. Your email and phone help friends recognise you.
+        </p>
+        <p className="text-[11px] text-slate-500">
+          Or{" "}
+          <Link href="/login" className="font-medium text-emerald-600 hover:underline">
+            sign in with Google
+          </Link>
         </p>
       </Card>
     </div>

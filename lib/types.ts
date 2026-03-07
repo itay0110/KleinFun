@@ -7,6 +7,7 @@ export interface User {
   name: string;
   phone: string;
   email?: string;
+  avatarUrl?: string;
 }
 
 export interface BusySlot {

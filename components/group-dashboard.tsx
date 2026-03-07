@@ -167,7 +167,6 @@ export function GroupDashboard() {
     console.log("handleCreateGroup", { newGroupName })
     if (!newGroupName.trim()) return;
     const group = await createGroup(newGroupName.trim());
-    createActivity(group.id, "בירה");
     setNewGroupName("");
     router.push(`/?group=${group.id}`);
   };
@@ -276,6 +275,13 @@ export function GroupDashboard() {
           </h2>
           {currentUser && (
             <p className="flex items-center gap-2 text-xs text-slate-500">
+              {currentUser.avatarUrl ? (
+                <img
+                  src={currentUser.avatarUrl}
+                  alt=""
+                  className="h-6 w-6 rounded-full object-cover"
+                />
+              ) : null}
               <span>Signed in as {currentUser.name}</span>
               <button
                 type="button"
