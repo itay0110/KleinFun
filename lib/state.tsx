@@ -40,6 +40,8 @@ interface KleinFunState {
 }
 
 interface KleinFunContextValue extends KleinFunState {
+  /** True after initial session check (getSession) has run; use to avoid flashing login before session is known. */
+  authReady: boolean;
   registerUser: (input: { name: string; phone: string; email?: string }) => Promise<void>;
   logout: () => void;
   createGroup: (name: string) => Promise<Group>;
@@ -107,6 +109,7 @@ function generateId(prefix: string) {
 
 export function KleinFunProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<KleinFunState>(() => loadInitialState());
+  const [authReady, setAuthReady] = useState(false);
 
   const setAndPersist = useCallback((updater: (prev: KleinFunState) => KleinFunState) => {
     setState(prev => {
@@ -243,6 +246,7 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
         data: { session }
       } = await supabase.auth.getSession();
       if (session?.user) await syncAuthUser(session.user);
+      setAuthReady(true);
     })();
 
     const {
@@ -867,6 +871,7 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
   const value: KleinFunContextValue = useMemo(
     () => ({
       ...state,
+      authReady,
       registerUser,
       logout,
       createGroup,
@@ -895,6 +900,7 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       state,
+      authReady,
       registerUser,
       logout,
       createGroup,
