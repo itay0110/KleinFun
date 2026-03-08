@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
 const WAIT_TIMEOUT_MS = 15_000;
+const POST_LOGIN_REDIRECT_KEY = "kleinfun_post_login_redirect";
 
 // Per page load: only one code exchange (ref resets on Strict Mode remount; this survives).
 let exchangeStarted = false;
@@ -38,7 +39,17 @@ function AuthCallbackInner() {
         if (cancelled) return;
         clearTimeout(timeoutId);
         setStatus("done");
-        window.location.replace("/");
+        let path = "/";
+        try {
+          const stored = typeof window !== "undefined" && window.sessionStorage.getItem(POST_LOGIN_REDIRECT_KEY);
+          if (stored && stored.startsWith("/")) {
+            path = stored;
+            window.sessionStorage.removeItem(POST_LOGIN_REDIRECT_KEY);
+          }
+        } catch {
+          // ignore
+        }
+        window.location.replace(path);
       })
       .catch((err: unknown) => {
         if (cancelled) return;

@@ -1,9 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { supabase } from "@/lib/supabase";
+
+const POST_LOGIN_REDIRECT_KEY = "kleinfun_post_login_redirect";
 
 function GoogleIcon({ className }: { className?: string }) {
   return (
@@ -34,6 +37,7 @@ function GoogleIcon({ className }: { className?: string }) {
 }
 
 export function LoginPage() {
+  const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,6 +45,15 @@ export function LoginPage() {
     setError(null);
     setLoading(true);
     try {
+      if (typeof window !== "undefined") {
+        const groupId = searchParams.get("group");
+        const returnPath = groupId ? `/?group=${encodeURIComponent(groupId)}` : "/";
+        try {
+          window.sessionStorage.setItem(POST_LOGIN_REDIRECT_KEY, returnPath);
+        } catch {
+          // ignore
+        }
+      }
       const redirectTo =
         typeof window !== "undefined"
           ? `${window.location.origin}/auth/callback`

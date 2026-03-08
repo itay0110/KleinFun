@@ -142,7 +142,6 @@ export function GroupDashboard() {
     : "";
 
   const handleCreateGroup = async () => {
-    console.log("handleCreateGroup", { newGroupName })
     if (!newGroupName.trim()) return;
     const group = await createGroup(newGroupName.trim());
     setNewGroupName("");

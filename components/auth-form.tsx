@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -10,6 +11,10 @@ import { useKleinFun } from "@/lib/state";
 const PHONE_PREFIX = "+972";
 
 export function AuthForm() {
+  const searchParams = useSearchParams();
+  const groupId = searchParams.get("group");
+  const loginHref = groupId ? `/login?group=${encodeURIComponent(groupId)}` : "/login";
+
   const { registerUser } = useKleinFun();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -96,7 +101,7 @@ export function AuthForm() {
         </p>
         <p className="text-[11px] text-slate-500">
           Or{" "}
-          <Link href="/login" className="font-medium text-emerald-600 hover:underline">
+          <Link href={loginHref} className="font-medium text-emerald-600 hover:underline">
             sign in with Google
           </Link>
         </p>
