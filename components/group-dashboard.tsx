@@ -142,30 +142,6 @@ export function GroupDashboard() {
     : "";
 
   const handleCreateGroup = async () => {
-    // #region agent log
-    if (process.env.NODE_ENV === 'development') {
-      fetch('http://127.0.0.1:7544/ingest/f4fa5eb8-6867-4703-900a-c451c59a00be', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Debug-Session-Id': '303c7c'
-        },
-        body: JSON.stringify({
-          sessionId: '303c7c',
-          runId: 'run1',
-          hypothesisId: 'H1',
-          location: 'components/group-dashboard.tsx:132',
-          message: 'handleCreateGroup invoked',
-          data: {
-            newGroupName,
-            hasActiveGroup: !!activeGroup,
-            groupsCount: Object.keys(groups).length
-          },
-          timestamp: Date.now()
-        })
-      }).catch(() => {});
-    }
-    // #endregion agent log
     console.log("handleCreateGroup", { newGroupName })
     if (!newGroupName.trim()) return;
     const group = await createGroup(newGroupName.trim());

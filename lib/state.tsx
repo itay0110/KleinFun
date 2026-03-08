@@ -119,30 +119,6 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
   const registerUser = useCallback(
     async (input: { name: string; phone: string; email?: string }) => {
       try {
-        // #region agent log
-        if (process.env.NODE_ENV === 'development') {
-          fetch('http://127.0.0.1:7544/ingest/f4fa5eb8-6867-4703-900a-c451c59a00be', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Debug-Session-Id': 'daf237'
-            },
-            body: JSON.stringify({
-              sessionId: 'daf237',
-              runId: 'run1',
-              hypothesisId: 'H1',
-              location: 'lib/state.tsx:119',
-              message: 'registerUser called',
-              data: {
-                hasName: !!input.name,
-                hasPhone: !!input.phone
-              },
-              timestamp: Date.now()
-            })
-          }).catch(() => {});
-        }
-        // #endregion agent log
-
         const { data, error } = await supabase
           .from("users")
           .insert({ name: input.name, phone: input.phone })
@@ -162,61 +138,12 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
           email: input.email?.trim() || undefined
         };
 
-        // #region agent log
-        if (process.env.NODE_ENV === 'development') {
-          fetch('http://127.0.0.1:7544/ingest/f4fa5eb8-6867-4703-900a-c451c59a00be', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Debug-Session-Id': 'daf237'
-            },
-            body: JSON.stringify({
-              sessionId: 'daf237',
-              runId: 'run1',
-              hypothesisId: 'H2',
-              location: 'lib/state.tsx:139',
-              message: 'registerUser Supabase insert success',
-              data: {
-                userId: user.id
-              },
-              timestamp: Date.now()
-            })
-          }).catch(() => {});
-        }
-        // #endregion agent log
-
         setAndPersist(prev => ({
           ...prev,
           currentUser: user,
           users: { ...prev.users, [user.id]: user }
         }));
       } catch (err) {
-        // #region agent log
-        if (process.env.NODE_ENV === 'development') {
-          fetch('http://127.0.0.1:7544/ingest/f4fa5eb8-6867-4703-900a-c451c59a00be', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Debug-Session-Id': 'daf237'
-            },
-            body: JSON.stringify({
-              sessionId: 'daf237',
-              runId: 'run1',
-              hypothesisId: 'H3',
-              location: 'lib/state.tsx:151',
-              message: 'registerUser Supabase error',
-              data: {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                code: (err as any)?.code,
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                supabaseMessage: (err as any)?.message
-              },
-              timestamp: Date.now()
-            })
-          }).catch(() => {});
-        }
-        // #endregion agent log
-
         // eslint-disable-next-line no-console
         console.error("Unexpected error while persisting user to Supabase", err);
         throw err;
@@ -669,30 +596,6 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
 
   const createActivity = useCallback(
     (groupId: GroupId, title: string): Activity => {
-      // #region agent log
-      if (process.env.NODE_ENV === 'development') {
-        fetch('http://127.0.0.1:7544/ingest/f4fa5eb8-6867-4703-900a-c451c59a00be', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Debug-Session-Id': '303c7c'
-          },
-          body: JSON.stringify({
-            sessionId: '303c7c',
-            runId: 'run1',
-            hypothesisId: 'H3',
-            location: 'lib/state.tsx:291',
-            message: 'createActivity called',
-            data: {
-              groupId,
-              title,
-              hasCurrentUser: !!state.currentUser
-            },
-            timestamp: Date.now()
-          })
-        }).catch(() => {});
-      }
-      // #endregion agent log
       if (!state.currentUser) {
         throw new Error("No current user");
       }
