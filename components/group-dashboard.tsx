@@ -103,6 +103,8 @@ export function GroupDashboard() {
     return groupList[0] ?? null;
   }, [groupId, groups]);
 
+  const isJoiningGroupFromInvite = Boolean(groupId && currentUser && !groups[groupId]);
+
   const userGroups = useMemo(() => {
     if (!currentUser) return [];
     return Object.values(groups).filter(g => g.memberIds.includes(currentUser.id));
@@ -145,7 +147,8 @@ export function GroupDashboard() {
     if (!newGroupName.trim()) return;
     const group = await createGroup(newGroupName.trim());
     setNewGroupName("");
-    router.push(`/?group=${group.id}`);
+    const id = group.id;
+    setTimeout(() => router.push(`/?group=${id}`), 0);
   };
 
   const handleJoinFromQuery = () => {
@@ -175,11 +178,11 @@ export function GroupDashboard() {
     setBusyOnGround(false);
   };
 
-  const handleActivityClick = (presetId: string) => {
+  const handleActivityClick = async (presetId: string) => {
     if (!activeGroup) return;
     const preset = DEFAULT_ACTIVITIES.find(p => p.id === presetId);
     if (!preset) return;
-    const activity = createActivity(activeGroup.id, preset.label);
+    const activity = await createActivity(activeGroup.id, preset.label);
     setSelectedActivityId(activity.id);
     setActivitySheetOpen(true);
   };
@@ -292,7 +295,13 @@ export function GroupDashboard() {
         </div>
       </header>
 
-      {!activeGroup && (
+      {isJoiningGroupFromInvite && (
+        <Card className="space-y-3">
+          <p className="text-sm text-slate-600">Joining group…</p>
+        </Card>
+      )}
+
+      {!activeGroup && !isJoiningGroupFromInvite && (
         <Card className="space-y-3">
           <p className="text-sm font-medium text-slate-900">
             Create your first group
@@ -554,9 +563,9 @@ export function GroupDashboard() {
                 <div key={type.id} className="relative">
                   <button
                     className="flex w-full flex-col items-center justify-center gap-1 rounded-2xl bg-slate-50 px-2 py-3 text-xs font-medium text-slate-800 shadow-soft"
-                    onClick={() => {
+                    onClick={async () => {
                       if (!activeGroup) return;
-                      const activity = createActivity(activeGroup.id, type.label);
+                      const activity = await createActivity(activeGroup.id, type.label);
                       setSelectedActivityId(activity.id);
                       setActivitySheetOpen(true);
                     }}

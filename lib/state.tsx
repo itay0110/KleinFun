@@ -10,6 +10,7 @@ import {
 } from "react";
 import {
   Activity,
+  ActivityComment,
   ActivityId,
   ActivityResponse,
   BusySlot,
@@ -49,11 +50,11 @@ interface KleinFunContextValue extends KleinFunState {
   joinGroupById: (groupId: GroupId) => Group | null;
   joinGroupByInviteLink: (groupId: GroupId) => Promise<Group | null>;
   getGroupMembers: (groupId: GroupId) => User[];
-  addBusySlot: (groupId: GroupId, start: Date, end: Date, onGround: boolean) => void;
+  addBusySlot: (groupId: GroupId, start: Date, end: Date, onGround: boolean) => Promise<void>;
   updateBusySlot: (slotId: string, start: Date, end: Date, onGround: boolean) => void;
   deleteBusySlot: (slotId: string) => void;
   clearBusySlots: (groupId: GroupId) => void;
-  createActivity: (groupId: GroupId, title: string) => Activity;
+  createActivity: (groupId: GroupId, title: string) => Promise<Activity>;
   deleteActivity: (activityId: ActivityId) => void;
   respondToActivity: (
     activityId: ActivityId,
@@ -159,6 +160,72 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
     supabase.auth.signOut().catch(() => {});
     setAndPersist(() => loadInitialState());
   }, [setAndPersist]);
+
+  // Sync groups and members from Supabase so all clients stay in sync (new joiners visible, etc.).
+  const syncGroupsFromSupabase = useCallback(async () => {
+    const userId = state.currentUser?.id;
+    if (!userId) return;
+    try {
+      const { data: memberRows } = await supabase
+        .from("group_members")
+        .select("group_id")
+        .eq("user_id", userId);
+      const groupIds = [...new Set((memberRows ?? []).map((r: { group_id: string }) => r.group_id))];
+      if (groupIds.length === 0) return;
+
+      const { data: groupRows } = await supabase
+        .from("groups")
+        .select()
+        .in("id", groupIds);
+
+      const { data: allMemberRows } = await supabase
+        .from("group_members")
+        .select("group_id, user_id")
+        .in("group_id", groupIds);
+
+      const userIds = [...new Set((allMemberRows ?? []).map((r: { user_id: string }) => r.user_id))];
+      const { data: userRows } = await supabase
+        .from("users")
+        .select()
+        .in("id", userIds);
+
+      const usersMap: Record<UserId, User> = {};
+      (userRows ?? []).forEach((row: { id: string; name: string; phone: string; email?: string; avatar_url?: string }) => {
+        usersMap[row.id] = {
+          id: row.id,
+          name: row.name,
+          phone: row.phone ?? "",
+          email: row.email,
+          avatarUrl: row.avatar_url
+        };
+      });
+
+      const membersByGroup: Record<string, UserId[]> = {};
+      (allMemberRows ?? []).forEach((r: { group_id: string; user_id: string }) => {
+        if (!membersByGroup[r.group_id]) membersByGroup[r.group_id] = [];
+        membersByGroup[r.group_id].push(r.user_id);
+      });
+
+      const groupsMap: Record<GroupId, Group> = {};
+      (groupRows ?? []).forEach((row: { id: string; name: string; created_by: string }) => {
+        groupsMap[row.id] = {
+          id: row.id,
+          name: row.name,
+          createdBy: row.created_by,
+          memberIds: membersByGroup[row.id] ?? []
+        };
+      });
+
+      setAndPersist(prev => ({
+        ...prev,
+        users: { ...prev.users, ...usersMap },
+        groups: { ...prev.groups, ...groupsMap }
+      }));
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("Failed to sync groups from Supabase", err);
+    }
+  }, [setAndPersist, state.currentUser?.id]);
 
   // Hydrate from localStorage, then sync Supabase Auth (auth wins so Google login is applied after refresh).
   useEffect(() => {
@@ -269,6 +336,94 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
 
     return () => subscription.unsubscribe();
   }, [setAndPersist]);
+
+  // Sync activities and busy_slots from Supabase for the user's groups.
+  const syncActivitiesAndBusySlotsFromSupabase = useCallback(async () => {
+    const userId = state.currentUser?.id;
+    if (!userId) return;
+    try {
+      const { data: memberRows } = await supabase
+        .from("group_members")
+        .select("group_id")
+        .eq("user_id", userId);
+      const groupIds = [...new Set((memberRows ?? []).map((r: { group_id: string }) => r.group_id))];
+      if (groupIds.length === 0) return;
+
+      const { data: activityRows } = await supabase
+        .from("activities")
+        .select()
+        .in("group_id", groupIds);
+
+      const activitiesMap: Record<ActivityId, Activity> = {};
+      (activityRows ?? []).forEach((row: {
+        id: string;
+        group_id: string;
+        title: string;
+        creator_id: string;
+        created_at: string;
+        start_time: string;
+        location: string | null;
+        notes: string | null;
+        responses: Record<string, ActivityResponse>;
+        comments: ActivityComment[];
+      }) => {
+        activitiesMap[row.id] = {
+          id: row.id,
+          groupId: row.group_id,
+          title: row.title,
+          creatorId: row.creator_id,
+          createdAt: row.created_at,
+          startTime: row.start_time,
+          location: row.location ?? undefined,
+          notes: row.notes ?? undefined,
+          responses: row.responses ?? {},
+          comments: Array.isArray(row.comments) ? row.comments : []
+        };
+      });
+
+      const { data: slotRows } = await supabase
+        .from("busy_slots")
+        .select()
+        .in("group_id", groupIds);
+
+      const busySlotsList: BusySlot[] = (slotRows ?? []).map((row: {
+        id: string;
+        user_id: string;
+        group_id: string;
+        start_at: string;
+        end_at: string;
+        on_ground: boolean;
+      }) => ({
+        id: row.id,
+        userId: row.user_id,
+        groupId: row.group_id,
+        start: row.start_at,
+        end: row.end_at,
+        onGround: row.on_ground
+      }));
+
+      setAndPersist(prev => ({
+        ...prev,
+        activities: activitiesMap,
+        busySlots: busySlotsList
+      }));
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("Failed to sync activities/busy_slots from Supabase", err);
+    }
+  }, [setAndPersist, state.currentUser?.id]);
+
+  // Refetch groups/members and activities/busy_slots from Supabase when user is set and on an interval.
+  useEffect(() => {
+    if (!state.currentUser?.id) return;
+    syncGroupsFromSupabase();
+    syncActivitiesAndBusySlotsFromSupabase().catch(() => {});
+    const interval = setInterval(() => {
+      syncGroupsFromSupabase();
+      syncActivitiesAndBusySlotsFromSupabase().catch(() => {});
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [state.currentUser?.id, syncGroupsFromSupabase, syncActivitiesAndBusySlotsFromSupabase]);
 
   const createGroup = useCallback(
     async (name: string): Promise<Group> => {
@@ -413,6 +568,7 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
           ...prev,
           groups: { ...prev.groups, [groupId]: updated }
         }));
+        syncGroupsFromSupabase().catch(() => {});
         return updated;
       }
 
@@ -476,9 +632,10 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
         groups: { ...prev.groups, [groupId]: group }
       }));
 
+      syncGroupsFromSupabase().catch(() => {});
       return group;
     },
-    [setAndPersist, state.currentUser, state.groups, state.users]
+    [setAndPersist, state.currentUser, state.groups, state.users, syncGroupsFromSupabase]
   );
 
   const getGroupMembers = useCallback(
@@ -546,7 +703,7 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
   );
 
   const addBusySlot = useCallback(
-    (groupId: GroupId, start: Date, end: Date, onGround: boolean) => {
+    async (groupId: GroupId, start: Date, end: Date, onGround: boolean) => {
       if (!state.currentUser) return;
       const slot: BusySlot = {
         id: generateId("busy"),
@@ -556,6 +713,19 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
         end: end.toISOString(),
         onGround
       };
+      const { error } = await supabase.from("busy_slots").insert({
+        id: slot.id,
+        user_id: slot.userId,
+        group_id: slot.groupId,
+        start_at: slot.start,
+        end_at: slot.end,
+        on_ground: slot.onGround ?? false
+      });
+      if (error) {
+        // eslint-disable-next-line no-console
+        console.error("Failed to add busy slot in Supabase", error);
+        throw error;
+      }
       setAndPersist(prev => ({
         ...prev,
         busySlots: [...prev.busySlots, slot]
@@ -565,7 +735,20 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
   );
 
   const updateBusySlot = useCallback(
-    (slotId: string, start: Date, end: Date, onGround: boolean) => {
+    async (slotId: string, start: Date, end: Date, onGround: boolean) => {
+      const { error } = await supabase
+        .from("busy_slots")
+        .update({
+          start_at: start.toISOString(),
+          end_at: end.toISOString(),
+          on_ground: onGround
+        })
+        .eq("id", slotId);
+      if (error) {
+        // eslint-disable-next-line no-console
+        console.error("Failed to update busy slot in Supabase", error);
+        return;
+      }
       setAndPersist(prev => ({
         ...prev,
         busySlots: prev.busySlots.map(slot =>
@@ -584,7 +767,13 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
   );
 
   const deleteBusySlot = useCallback(
-    (slotId: string) => {
+    async (slotId: string) => {
+      const { error } = await supabase.from("busy_slots").delete().eq("id", slotId);
+      if (error) {
+        // eslint-disable-next-line no-console
+        console.error("Failed to delete busy slot in Supabase", error);
+        return;
+      }
       setAndPersist(prev => ({
         ...prev,
         busySlots: prev.busySlots.filter(slot => slot.id !== slotId)
@@ -594,8 +783,18 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
   );
 
   const clearBusySlots = useCallback(
-    (groupId: GroupId) => {
+    async (groupId: GroupId) => {
       if (!state.currentUser) return;
+      const { error } = await supabase
+        .from("busy_slots")
+        .delete()
+        .eq("group_id", groupId)
+        .eq("user_id", state.currentUser.id);
+      if (error) {
+        // eslint-disable-next-line no-console
+        console.error("Failed to clear busy slots in Supabase", error);
+        return;
+      }
       setAndPersist(prev => ({
         ...prev,
         busySlots: prev.busySlots.filter(
@@ -607,7 +806,7 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
   );
 
   const createActivity = useCallback(
-    (groupId: GroupId, title: string): Activity => {
+    async (groupId: GroupId, title: string): Promise<Activity> => {
       if (!state.currentUser) {
         throw new Error("No current user");
       }
@@ -616,7 +815,15 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
       const now = new Date();
       const start = addMinutes(now, 30);
 
-      const baseActivity: Activity = {
+      const responses: Record<UserId, ActivityResponse> = {};
+      const group = state.groups[groupId];
+      if (group) {
+        group.memberIds.forEach(uid => {
+          responses[uid] = uid === state.currentUser!.id ? "joined" : "pending";
+        });
+      }
+
+      const activity: Activity = {
         id,
         groupId,
         title,
@@ -625,26 +832,30 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
         startTime: start.toISOString(),
         location: "",
         notes: "",
-        responses: {},
+        responses,
         comments: []
       };
 
+      const { error } = await supabase.from("activities").insert({
+        id: activity.id,
+        group_id: activity.groupId,
+        title: activity.title,
+        creator_id: activity.creatorId,
+        created_at: activity.createdAt,
+        start_time: activity.startTime,
+        location: activity.location ?? "",
+        notes: activity.notes ?? "",
+        responses: activity.responses,
+        comments: activity.comments
+      });
+      if (error) {
+        // eslint-disable-next-line no-console
+        console.error("Failed to create activity in Supabase", error);
+        throw error;
+      }
+
       setAndPersist(prev => {
-        const responses: Record<UserId, ActivityResponse> = {};
-        const group = prev.groups[groupId];
-        if (group) {
-          group.memberIds.forEach(uid => {
-            responses[uid] = uid === state.currentUser!.id ? "joined" : "pending";
-          });
-        }
-
-        const activity: Activity = {
-          ...baseActivity,
-          responses
-        };
-
         const notifications = buildActivityNotifications(activity, prev);
-
         return {
           ...prev,
           activities: { ...prev.activities, [id]: activity },
@@ -652,120 +863,163 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
         };
       });
 
-      // The returned object is consistent with what we just stored,
-      // and callers only need the id/group/title immediately.
-      return baseActivity;
+      return activity;
     },
-    [setAndPersist, state.currentUser]
+    [setAndPersist, state.currentUser, state.groups]
   );
 
   const deleteActivity = useCallback(
-    (activityId: ActivityId) => {
+    async (activityId: ActivityId) => {
       if (!state.currentUser) return;
+      const activity = state.activities[activityId];
+      if (!activity || activity.creatorId !== state.currentUser.id) return;
+      const { error } = await supabase.from("activities").delete().eq("id", activityId);
+      if (error) {
+        // eslint-disable-next-line no-console
+        console.error("Failed to delete activity in Supabase", error);
+        return;
+      }
       setAndPersist(prev => {
-        const activity = prev.activities[activityId];
-        if (!activity || activity.creatorId !== state.currentUser!.id) {
-          return prev;
-        }
         const { [activityId]: _removed, ...restActivities } = prev.activities;
         return {
           ...prev,
           activities: restActivities,
-          notifications: prev.notifications.filter(
-            n => n.activityId !== activityId
-          )
+          notifications: prev.notifications.filter(n => n.activityId !== activityId)
         };
       });
     },
-    [setAndPersist, state.currentUser]
+    [setAndPersist, state.currentUser, state.activities]
   );
 
   const respondToActivity = useCallback(
-    (activityId: ActivityId, userId: UserId, response: ActivityResponse) => {
+    async (activityId: ActivityId, userId: UserId, response: ActivityResponse) => {
+      const activity = state.activities[activityId];
+      if (!activity) return;
+      const updatedResponses = { ...activity.responses, [userId]: response };
+      const { error } = await supabase
+        .from("activities")
+        .update({ responses: updatedResponses })
+        .eq("id", activityId);
+      if (error) {
+        // eslint-disable-next-line no-console
+        console.error("Failed to update activity response in Supabase", error);
+        return;
+      }
       setAndPersist(prev => {
-        const activity = prev.activities[activityId];
-        if (!activity) return prev;
-        const updated: Activity = {
-          ...activity,
-          responses: { ...activity.responses, [userId]: response }
-        };
+        const a = prev.activities[activityId];
+        if (!a) return prev;
         return {
           ...prev,
-          activities: { ...prev.activities, [activityId]: updated }
+          activities: {
+            ...prev.activities,
+            [activityId]: { ...a, responses: updatedResponses }
+          }
         };
       });
     },
-    [setAndPersist]
+    [setAndPersist, state.activities]
   );
 
   const addCommentToActivity = useCallback(
-    (activityId: ActivityId, text: string) => {
+    async (activityId: ActivityId, text: string) => {
       if (!state.currentUser) return;
+      const activity = state.activities[activityId];
+      if (!activity) return;
       const now = new Date();
-      const commentId = generateId("c");
+      const comment: ActivityComment = {
+        id: generateId("c"),
+        userId: state.currentUser.id,
+        text,
+        createdAt: now.toISOString()
+      };
+      const updatedComments = [...activity.comments, comment];
+      const { error } = await supabase
+        .from("activities")
+        .update({ comments: updatedComments })
+        .eq("id", activityId);
+      if (error) {
+        // eslint-disable-next-line no-console
+        console.error("Failed to add comment in Supabase", error);
+        return;
+      }
       setAndPersist(prev => {
-        const activity = prev.activities[activityId];
-        if (!activity) return prev;
-        const comment = {
-          id: commentId,
-          userId: state.currentUser!.id,
-          text,
-          createdAt: now.toISOString()
-        };
-        const updated: Activity = {
-          ...activity,
-          comments: [...activity.comments, comment]
-        };
+        const a = prev.activities[activityId];
+        if (!a) return prev;
         return {
           ...prev,
-          activities: { ...prev.activities, [activityId]: updated }
+          activities: {
+            ...prev.activities,
+            [activityId]: { ...a, comments: updatedComments }
+          }
         };
       });
     },
-    [setAndPersist, state.currentUser]
+    [setAndPersist, state.currentUser, state.activities]
   );
 
   const updateActivityTime = useCallback(
-    (activityId: ActivityId, startTime: Date) => {
+    async (activityId: ActivityId, startTime: Date) => {
       if (!state.currentUser) return;
+      const activity = state.activities[activityId];
+      if (!activity || activity.creatorId !== state.currentUser.id) return;
+      const startTimeIso = startTime.toISOString();
+      const { error } = await supabase
+        .from("activities")
+        .update({ start_time: startTimeIso })
+        .eq("id", activityId);
+      if (error) {
+        // eslint-disable-next-line no-console
+        console.error("Failed to update activity time in Supabase", error);
+        return;
+      }
       setAndPersist(prev => {
-        const activity = prev.activities[activityId];
-        if (!activity) return prev;
-        if (activity.creatorId !== state.currentUser!.id) return prev;
-        const updated: Activity = {
-          ...activity,
-          startTime: startTime.toISOString()
-        };
+        const a = prev.activities[activityId];
+        if (!a || a.creatorId !== state.currentUser!.id) return prev;
         return {
           ...prev,
-          activities: { ...prev.activities, [activityId]: updated }
+          activities: {
+            ...prev.activities,
+            [activityId]: { ...a, startTime: startTimeIso }
+          }
         };
       });
     },
-    [setAndPersist, state.currentUser]
+    [setAndPersist, state.currentUser, state.activities]
   );
 
   const updateActivityDetails = useCallback(
-    (
+    async (
       activityId: ActivityId,
       details: { location?: string; notes?: string }
     ) => {
       if (!state.currentUser) return;
+      const activity = state.activities[activityId];
+      if (!activity || activity.creatorId !== state.currentUser.id) return;
+      const payload: { location?: string; notes?: string } = {};
+      if (details.location !== undefined) payload.location = details.location;
+      if (details.notes !== undefined) payload.notes = details.notes;
+      const { error } = await supabase
+        .from("activities")
+        .update(payload)
+        .eq("id", activityId);
+      if (error) {
+        // eslint-disable-next-line no-console
+        console.error("Failed to update activity details in Supabase", error);
+        return;
+      }
       setAndPersist(prev => {
-        const activity = prev.activities[activityId];
-        if (!activity || activity.creatorId !== state.currentUser!.id) return prev;
-        const updated: Activity = {
-          ...activity,
-          ...(details.location !== undefined && { location: details.location }),
-          ...(details.notes !== undefined && { notes: details.notes })
-        };
+        const a = prev.activities[activityId];
+        if (!a || a.creatorId !== state.currentUser!.id) return prev;
         return {
           ...prev,
-          activities: { ...prev.activities, [activityId]: updated }
+          activities: {
+            ...prev.activities,
+            [activityId]: { ...a, ...payload }
+          }
         };
       });
     },
-    [setAndPersist, state.currentUser]
+    [setAndPersist, state.currentUser, state.activities]
   );
 
   const getGroupMemberStatuses = useCallback(
