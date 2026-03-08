@@ -447,6 +447,12 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
 
   const createGroup = useCallback(
     async (name: string): Promise<Group> => {
+      // #region agent log
+      if (typeof window !== "undefined") {
+        // eslint-disable-next-line no-console
+        console.log("[createGroup] called", { name, userId: state.currentUser?.id });
+      }
+      // #endregion agent log
       if (!state.currentUser) {
         throw new Error("No current user");
       }
@@ -465,6 +471,13 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
         .select()
         .single();
 
+      // #region agent log
+      if (typeof window !== "undefined") {
+        // eslint-disable-next-line no-console
+        console.log("[createGroup] groups insert result", { groupRow: !!groupRow, groupError: groupError?.message, groupId: groupRow?.id });
+      }
+      // #endregion agent log
+
       if (groupError || !groupRow) {
         // eslint-disable-next-line no-console
         console.error("Failed to create group in Supabase", groupError);
@@ -479,6 +492,13 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
           group_id: groupRow.id,
           user_id: state.currentUser.id
         });
+
+      // #region agent log
+      if (typeof window !== "undefined") {
+        // eslint-disable-next-line no-console
+        console.log("[createGroup] group_members insert", { memberError: memberError?.message });
+      }
+      // #endregion agent log
 
       if (memberError) {
         // eslint-disable-next-line no-console
@@ -499,6 +519,13 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
         ...prev,
         groups: { ...prev.groups, [group.id]: group }
       }));
+
+      // #region agent log
+      if (typeof window !== "undefined") {
+        // eslint-disable-next-line no-console
+        console.log("[createGroup] setAndPersist done", { groupId: group.id });
+      }
+      // #endregion agent log
 
       syncGroupsFromSupabase().catch(() => {});
       return group;

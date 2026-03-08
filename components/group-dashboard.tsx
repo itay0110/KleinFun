@@ -147,12 +147,18 @@ export function GroupDashboard() {
   const handleCreateGroup = async () => {
     if (!newGroupName.trim()) return;
     setCreateGroupError(null);
+    // eslint-disable-next-line no-console
+    console.log("[handleCreateGroup] clicked", { name: newGroupName.trim() });
     try {
       const group = await createGroup(newGroupName.trim());
+      // eslint-disable-next-line no-console
+      console.log("[handleCreateGroup] createGroup returned", { groupId: group.id });
       setNewGroupName("");
       const id = group.id;
       setTimeout(() => router.push(`/?group=${id}`), 0);
     } catch (err) {
+      // eslint-disable-next-line no-console
+      console.log("[handleCreateGroup] catch", { err: String(err) });
       setCreateGroupError(err instanceof Error ? err.message : "Could not create group. Check Supabase RLS (see supabase/README.md).");
     }
   };
