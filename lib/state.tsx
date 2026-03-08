@@ -439,53 +439,51 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
         throw new Error("No current user");
       }
 
-      try {
-        const { data: groupRow, error: groupError } = await supabase
-          .from("groups")
-          .insert({
-            name,
-            created_by: state.currentUser.id
-          })
-          .select()
-          .single();
+      const { data: groupRow, error: groupError } = await supabase
+        .from("groups")
+        .insert({
+          name,
+          created_by: state.currentUser.id
+        })
+        .select()
+        .single();
 
-        if (groupError || !groupRow) {
-          // eslint-disable-next-line no-console
-          console.error("Failed to create group in Supabase", groupError);
-          throw groupError ?? new Error("No group returned from Supabase");
-        }
-
-        const { error: memberError } = await supabase
-          .from("group_members")
-          .insert({
-            group_id: groupRow.id,
-            user_id: state.currentUser.id
-          });
-
-        if (memberError) {
-          // eslint-disable-next-line no-console
-          console.error("Failed to add creator to group_members", memberError);
-          throw memberError;
-        }
-
-        const group: Group = {
-          id: groupRow.id,
-          name: groupRow.name,
-          memberIds: [state.currentUser.id],
-          createdBy: state.currentUser.id
-        };
-
-        setAndPersist(prev => ({
-          ...prev,
-          groups: { ...prev.groups, [group.id]: group }
-        }));
-
-        return group;
-      } catch (err) {
+      if (groupError || !groupRow) {
         // eslint-disable-next-line no-console
-        console.error("Unexpected error while creating group in Supabase", err);
-        throw err;
+        console.error("Failed to create group in Supabase", groupError);
+        throw new Error(
+          groupError?.message ?? "Could not create group. In Supabase, enable RLS and add policies for groups (see supabase/README.md)."
+        );
       }
+
+      const { error: memberError } = await supabase
+        .from("group_members")
+        .insert({
+          group_id: groupRow.id,
+          user_id: state.currentUser.id
+        });
+
+      if (memberError) {
+        // eslint-disable-next-line no-console
+        console.error("Failed to add creator to group_members", memberError);
+        throw new Error(
+          memberError?.message ?? "Could not add you to the group. In Supabase, add RLS policies for group_members (see supabase/README.md)."
+        );
+      }
+
+      const group: Group = {
+        id: groupRow.id,
+        name: groupRow.name,
+        memberIds: [state.currentUser.id],
+        createdBy: state.currentUser.id
+      };
+
+      setAndPersist(prev => ({
+        ...prev,
+        groups: { ...prev.groups, [group.id]: group }
+      }));
+
+      return group;
     },
     [setAndPersist, state.currentUser]
   );

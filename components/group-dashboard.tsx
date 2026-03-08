@@ -90,6 +90,7 @@ export function GroupDashboard() {
   const [showGroupsPanel, setShowGroupsPanel] = useState(false);
   const [showAddGroupForm, setShowAddGroupForm] = useState(false);
   const [showAddActivityTypeForm, setShowAddActivityTypeForm] = useState(false);
+  const [createGroupError, setCreateGroupError] = useState<string | null>(null);
 
   // When user opens an invite link (?group=...) while logged in, auto-join the group.
   useEffect(() => {
@@ -145,10 +146,15 @@ export function GroupDashboard() {
 
   const handleCreateGroup = async () => {
     if (!newGroupName.trim()) return;
-    const group = await createGroup(newGroupName.trim());
-    setNewGroupName("");
-    const id = group.id;
-    setTimeout(() => router.push(`/?group=${id}`), 0);
+    setCreateGroupError(null);
+    try {
+      const group = await createGroup(newGroupName.trim());
+      setNewGroupName("");
+      const id = group.id;
+      setTimeout(() => router.push(`/?group=${id}`), 0);
+    } catch (err) {
+      setCreateGroupError(err instanceof Error ? err.message : "Could not create group. Check Supabase RLS (see supabase/README.md).");
+    }
   };
 
   const handleJoinFromQuery = () => {
@@ -310,12 +316,15 @@ export function GroupDashboard() {
             <Input
               placeholder="Friends, Team, Family..."
               value={newGroupName}
-              onChange={e => setNewGroupName(e.target.value)}
+              onChange={e => { setNewGroupName(e.target.value); setCreateGroupError(null); }}
             />
             <Button className="w-full" onClick={handleCreateGroup}>
               <Plus className="mr-1.5 h-4 w-4" />
               Create group
             </Button>
+            {createGroupError && (
+              <p className="text-[11px] text-rose-500">{createGroupError}</p>
+            )}
           </div>
           {/* Join group from invite link button removed per request */}
         </Card>
@@ -397,28 +406,34 @@ export function GroupDashboard() {
                 </button>
               </div>
               {showAddGroupForm && (
-                <div className="flex gap-2">
-                  <Input
-                    className="h-8 flex-1 text-xs"
-                    placeholder="New group name"
-                    value={newGroupName}
-                    onChange={e => setNewGroupName(e.target.value)}
-                  />
-                  <Button
-                    size="sm"
-                    disabled={!newGroupName.trim()}
-                    onClick={async () => {
-                      try {
-                        await handleCreateGroup();
-                        setShowAddGroupForm(false);
-                      } catch {
-                        // leave form open on error
-                      }
-                    }}
-                  >
-                    <Plus className="mr-1.5 h-3 w-3" />
-                    New
-                  </Button>
+                <div className="flex flex-col gap-2">
+                  <div className="flex gap-2">
+                    <Input
+                      className="h-8 flex-1 text-xs"
+                      placeholder="New group name"
+                      value={newGroupName}
+                      onChange={e => { setNewGroupName(e.target.value); setCreateGroupError(null); }}
+                    />
+                    <Button
+                      size="sm"
+                      disabled={!newGroupName.trim()}
+                      onClick={async () => {
+                        setCreateGroupError(null);
+                        try {
+                          await handleCreateGroup();
+                          setShowAddGroupForm(false);
+                        } catch {
+                          // error shown via createGroupError
+                        }
+                      }}
+                    >
+                      <Plus className="mr-1.5 h-3 w-3" />
+                      New
+                    </Button>
+                  </div>
+                  {createGroupError && (
+                    <p className="text-[11px] text-rose-500">{createGroupError}</p>
+                  )}
                 </div>
               )}
               <div className="flex gap-2 overflow-x-auto">
