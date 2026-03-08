@@ -402,11 +402,19 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
         onGround: row.on_ground
       }));
 
-      setAndPersist(prev => ({
-        ...prev,
-        activities: activitiesMap,
-        busySlots: busySlotsList
-      }));
+      setAndPersist(prev => {
+        const serverActivityIds = new Set(Object.keys(activitiesMap));
+        const localOnlyActivities = Object.fromEntries(
+          Object.entries(prev.activities).filter(([id]) => !serverActivityIds.has(id))
+        );
+        const serverSlotIds = new Set(busySlotsList.map(s => s.id));
+        const localOnlySlots = prev.busySlots.filter(s => !serverSlotIds.has(s.id));
+        return {
+          ...prev,
+          activities: { ...localOnlyActivities, ...activitiesMap },
+          busySlots: [...busySlotsList, ...localOnlySlots]
+        };
+      });
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error("Failed to sync activities/busy_slots from Supabase", err);
@@ -723,8 +731,7 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
       });
       if (error) {
         // eslint-disable-next-line no-console
-        console.error("Failed to add busy slot in Supabase", error);
-        throw error;
+        console.error("Failed to add busy slot in Supabase. Run supabase/migrations/20250305000000_activities_and_busy_slots.sql in Supabase SQL Editor.", error);
       }
       setAndPersist(prev => ({
         ...prev,
@@ -850,8 +857,16 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
       });
       if (error) {
         // eslint-disable-next-line no-console
-        console.error("Failed to create activity in Supabase", error);
-        throw error;
+        console.error("Failed to create activity in Supabase. Run supabase/migrations/20250305000000_activities_and_busy_slots.sql in Supabase SQL Editor.", error);
+        setAndPersist(prev => {
+          const notifications = buildActivityNotifications(activity, prev);
+          return {
+            ...prev,
+            activities: { ...prev.activities, [id]: activity },
+            notifications: [...prev.notifications, ...notifications]
+          };
+        });
+        return activity;
       }
 
       setAndPersist(prev => {
