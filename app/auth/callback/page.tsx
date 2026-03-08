@@ -21,7 +21,8 @@ function AuthCallbackInner() {
       .exchangeCodeForSession(code)
       .then(() => {
         setStatus("done");
-        router.replace("/");
+        // Full-page redirect so the app loads with session; avoids being stuck on callback
+        window.location.replace("/");
       })
       .catch(() => {
         setStatus("error");
