@@ -216,11 +216,17 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
         };
       });
 
-      setAndPersist(prev => ({
-        ...prev,
-        users: { ...prev.users, ...usersMap },
-        groups: { ...prev.groups, ...groupsMap }
-      }));
+      setAndPersist(prev => {
+        const nextGroups =
+          groupIds.length > 0 && Object.keys(groupsMap).length === 0
+            ? prev.groups
+            : { ...prev.groups, ...groupsMap };
+        return {
+          ...prev,
+          users: { ...prev.users, ...usersMap },
+          groups: nextGroups
+        };
+      });
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error("Failed to sync groups from Supabase", err);
@@ -424,13 +430,19 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
   // Refetch groups/members and activities/busy_slots from Supabase when user is set and on an interval.
   useEffect(() => {
     if (!state.currentUser?.id) return;
-    syncGroupsFromSupabase();
-    syncActivitiesAndBusySlotsFromSupabase().catch(() => {});
+    const delayMs = 1500;
+    const initial = setTimeout(() => {
+      syncGroupsFromSupabase();
+      syncActivitiesAndBusySlotsFromSupabase().catch(() => {});
+    }, delayMs);
     const interval = setInterval(() => {
       syncGroupsFromSupabase();
       syncActivitiesAndBusySlotsFromSupabase().catch(() => {});
     }, 15000);
-    return () => clearInterval(interval);
+    return () => {
+      clearTimeout(initial);
+      clearInterval(interval);
+    };
   }, [state.currentUser?.id, syncGroupsFromSupabase, syncActivitiesAndBusySlotsFromSupabase]);
 
   const createGroup = useCallback(
@@ -439,12 +451,17 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
         throw new Error("No current user");
       }
 
+      const insertPayload: { id?: string; name: string; created_by: string } = {
+        name,
+        created_by: state.currentUser.id
+      };
+      if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+        insertPayload.id = crypto.randomUUID();
+      }
+
       const { data: groupRow, error: groupError } = await supabase
         .from("groups")
-        .insert({
-          name,
-          created_by: state.currentUser.id
-        })
+        .insert(insertPayload)
         .select()
         .single();
 
@@ -483,9 +500,10 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
         groups: { ...prev.groups, [group.id]: group }
       }));
 
+      syncGroupsFromSupabase().catch(() => {});
       return group;
     },
-    [setAndPersist, state.currentUser]
+    [setAndPersist, state.currentUser, syncGroupsFromSupabase]
   );
 
   const deleteGroup = useCallback(
