@@ -242,11 +242,19 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
     }
 
     (async () => {
-      const {
-        data: { session }
-      } = await supabase.auth.getSession();
-      if (session?.user) await syncAuthUser(session.user);
-      setAuthReady(true);
+      const authReadyTimeout = setTimeout(() => setAuthReady(true), 8000);
+      try {
+        const {
+          data: { session }
+        } = await supabase.auth.getSession();
+        if (session?.user) await syncAuthUser(session.user);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error("Failed to get session on init", err);
+      } finally {
+        clearTimeout(authReadyTimeout);
+        setAuthReady(true);
+      }
     })();
 
     const {
