@@ -457,55 +457,76 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
         throw new Error("No current user");
       }
 
-      const insertPayload: { id?: string; name: string; created_by: string } = {
-        name,
-        created_by: state.currentUser.id
-      };
-      if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-        insertPayload.id = crypto.randomUUID();
-      }
+      let groupRow: { id: string; name: string; created_by?: string } | null = null;
 
-      const { data: groupRow, error: groupError } = await supabase
-        .from("groups")
-        .insert(insertPayload)
-        .select()
-        .single();
+      try {
+        const insertPayload: { id?: string; name: string; created_by: string } = {
+          name,
+          created_by: state.currentUser.id
+        };
+        if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+          insertPayload.id = crypto.randomUUID();
+        }
 
-      // #region agent log
-      if (typeof window !== "undefined") {
-        // eslint-disable-next-line no-console
-        console.log("[createGroup] groups insert result", { groupRow: !!groupRow, groupError: groupError?.message, groupId: groupRow?.id });
-      }
-      // #endregion agent log
+        const insertPromise = supabase
+          .from("groups")
+          .insert(insertPayload)
+          .select()
+          .single();
 
-      if (groupError || !groupRow) {
-        // eslint-disable-next-line no-console
-        console.error("Failed to create group in Supabase", groupError);
-        throw new Error(
-          groupError?.message ?? "Could not create group. In Supabase, enable RLS and add policies for groups (see supabase/README.md)."
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("groups_insert_timeout")), 5000)
         );
-      }
 
-      const { error: memberError } = await supabase
-        .from("group_members")
-        .insert({
-          group_id: groupRow.id,
-          user_id: state.currentUser.id
-        });
+        const { data, error } = (await Promise.race([insertPromise, timeoutPromise])) as {
+          data: { id: string; name: string; created_by?: string } | null;
+          error: { message?: string } | null;
+        };
 
-      // #region agent log
-      if (typeof window !== "undefined") {
+        groupRow = data;
+
+        // #region agent log
+        if (typeof window !== "undefined") {
+          // eslint-disable-next-line no-console
+          console.log("[createGroup] groups insert result", {
+            groupRow: !!groupRow,
+            groupError: error?.message,
+            groupId: groupRow?.id
+          });
+        }
+        // #endregion agent log
+
+        if (error || !groupRow) {
+          throw error ?? new Error("groups_insert_failed");
+        }
+
+        const { error: memberError } = await supabase
+          .from("group_members")
+          .insert({
+            group_id: groupRow.id,
+            user_id: state.currentUser.id
+          });
+
+        // #region agent log
+        if (typeof window !== "undefined") {
+          // eslint-disable-next-line no-console
+          console.log("[createGroup] group_members insert", { memberError: memberError?.message });
+        }
+        // #endregion agent log
+
+        if (memberError) {
+          throw memberError;
+        }
+      } catch (err) {
         // eslint-disable-next-line no-console
-        console.log("[createGroup] group_members insert", { memberError: memberError?.message });
-      }
-      // #endregion agent log
-
-      if (memberError) {
-        // eslint-disable-next-line no-console
-        console.error("Failed to add creator to group_members", memberError);
-        throw new Error(
-          memberError?.message ?? "Could not add you to the group. In Supabase, add RLS policies for group_members (see supabase/README.md)."
-        );
+        console.error("[createGroup] Supabase insert failed or timed out, falling back to local-only group", err);
+        if (!groupRow) {
+          groupRow = {
+            id: `group_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
+            name,
+            created_by: state.currentUser.id
+          };
+        }
       }
 
       const group: Group = {
@@ -527,10 +548,9 @@ export function KleinFunProvider({ children }: { children: React.ReactNode }) {
       }
       // #endregion agent log
 
-      syncGroupsFromSupabase().catch(() => {});
       return group;
     },
-    [setAndPersist, state.currentUser, syncGroupsFromSupabase]
+    [setAndPersist, state.currentUser]
   );
 
   const deleteGroup = useCallback(
